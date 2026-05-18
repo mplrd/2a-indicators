@@ -14,28 +14,57 @@ Specs complètes dans `docs/SPECIFICATIONS.md`.
 - **Documentation feature**: `docs/<feature>.md` (français)
 
 ## Architecture
+
+Découpage en **3 couches**. Objectif : qu'une stratégie (à venir) puisse importer un signal pur (ex : CMI) **sans embarquer une ligne de code de dessin**.
+
 ```
 indicators/
 ├── tradingview/
-│   ├── lib-price.pine      # Calculs purs : indicateurs, CMI, gaps, sessions, niveaux
-│   ├── lib-hours.pine      # Gestion des horaires
-│   ├── lib-drawing.pine    # Affichage : config visuelle, lignes/zones/boxes, nettoyage
-│   ├── lib-*.pine          # Toute autre lib représentant un "domaine métier"
-│   ├── layout.pine         # Indicateur "2Ai Layout"
-│   ├── levels.pine         # Indicateur "2Ai Levels"
-│   ├── zones.pine          # Indicateur "2Ai Zones"
-│   ├── zones-MTF.pine      # Indicateur "2Ai Zones MTF"
-│   └── *.pine              # Tout autre indicateur "2Ai XXX"
+│   │  --- Couche 0 : fondations (types & utils) ---
+│   ├── lib-time.pine        # Timezones, isNewDay, sessions, sessionStart/End, isFirstH1OfDay
+│   ├── lib-market.pine      # Détection cashEU / cashUS / cashAsia / nonCash         (dep: lib-time)
+│   ├── lib-zone.pine        # UDT Zone, overlap, contains, expired, helpers FIFO
+│   │
+│   │  --- Couche 1 : signaux & calculs purs (importable par les stratégies) ---
+│   ├── lib-ma.pine          # SMA, slope%, isFlatSeries, ribbon (SMA ± std)
+│   ├── lib-bollinger.pine   # BB inner/outer, bandState (open/flat/closing)         (dep: lib-ma)
+│   ├── lib-ichimoku.pine    # Tenkan / Kijun / Senkou A&B / Chikou
+│   ├── lib-supertrend.pine  # Line + dir normalisée ±1
+│   ├── lib-cmi.pine         # Signal bull/bear, validation 3 bougies, construit Zone (dep: lib-zone)
+│   ├── lib-fvg.pine         # Signal, niveaux, comblement, retourne une Zone        (dep: lib-zone)
+│   ├── lib-gap.pine         # Détection gap daily + cycle de vie                    (dep: lib-time)
+│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, IBR               (dep: lib-time)
+│   │
+│   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
+│   ├── lib-draw.pine        # Palette, styles, withAlpha, drawLevel, drawBox, fillCloud, FIFO
+│   ├── lib-zone-draw.pine   # renderZone(Zone, style)                               (dep: lib-zone, lib-draw)
+│   │
+│   │  --- Indicateurs ---
+│   ├── layout.pine          # 2Ai Layout
+│   ├── levels.pine          # 2Ai Levels
+│   ├── zones.pine           # 2Ai Zones
+│   ├── zones-MTF.pine       # 2Ai Zones MTF
+│   └── *.pine               # Tout autre 2Ai XXX
 ├── docs/
-│   ├── SPECIFICATIONS.md   # Référence du comportement attendu
-│   └── <feature>.md        # Doc par feature (français)
-└── .claude/skills/         # Skills invocables
+│   ├── SPECIFICATIONS.md    # Référence du comportement attendu
+│   ├── LIBS.md              # Tableau des versions publiées de chaque lib
+│   └── <feature>.md         # Doc par feature (français)
+└── .claude/skills/          # Skills invocables
 ```
 
-### Règle d'or
-- **Libs** : calculs purs et primitives d'affichage réutilisables. Pas de logique d'indicateur.
-- **Indicateurs** : importent les libs, déclarent les inputs, orchestrent. Pas de logique métier dupliquée.
-- Tous les calculs vivent dans une lib pour rester portables vers les autres plateformes.
+### Règle d'or — isolation des couches
+
+1. **Une lib de Couche 0 ou 1 ne référence JAMAIS** : `line.new`, `box.new`, `label.new`, `polyline.new`, `plot*`, `fill`, `bgcolor`, `hline`, ni de littéral `color.*`. Tout ce qui dessine est interdit. Vérifiable par grep.
+2. **Une lib de Couche 0 ou 1 ne lit JAMAIS d'`input.*`** — l'indicateur (ou la stratégie) passe tout en paramètre.
+3. **Une lib de Couche 2** n'a **aucune logique métier** : elle dessine ce qu'on lui passe, point.
+4. **Indicateurs** : importent ce qu'il faut, déclarent les inputs, orchestrent. Aucune logique de calcul dupliquée.
+5. **UDT** : créés seulement quand on persiste un état (`Zone`, `Gap`, `PendingZone`). Pour des valeurs de barre : tuples.
+6. Une lib **peut** importer une autre lib de la même couche ou de la couche inférieure ; jamais d'une couche supérieure.
+
+### Versioning des libs
+- Chaque lib a sa version publiée TradingView indépendante (`import <publisher>/<libName>/<version>`).
+- Quand une lib bump, propager le `/<version>` dans **toutes** les libs/indicateurs qui l'importent.
+- Le tableau de versions vit dans `docs/LIBS.md` (créé au premier publish).
 
 ## Conventions
 - Code et identifiants : **anglais** (variables, fonctions, types, commentaires Pine)
