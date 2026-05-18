@@ -1,0 +1,41 @@
+//@version=6
+// @description lib-market — détection automatique du type d'instrument (cashEU / cashUS / cashAsia / nonCash). Couche 0.
+//              Dépend de lib-time pour les helpers de session.
+//
+//              STATUT v1 : enum exposée, `detect()` est un STUB qui retourne toujours NON_CASH.
+//              La logique complète (comparaison de la 1re bougie quotidienne aux sessions standards EU/US/Asia)
+//              sera développée en même temps que l'indicateur 2Ai Levels qui en est le premier consommateur.
+library("lib_market", overlay = true)
+
+// import <publisher>/lib_time/<n> as time
+
+// ============================================================
+// Types
+// ============================================================
+
+// @enum MarketType — Classification d'un instrument selon l'horaire de sa première bougie quotidienne.
+export enum MarketType
+    CASH_EU
+    CASH_US
+    CASH_ASIA
+    NON_CASH
+
+// ============================================================
+// Détection
+// ============================================================
+
+// @function Détecte le type de marché.
+//
+//           ALGORITHME CIBLE (à implémenter avec Levels) :
+//             1. Identifier la première bougie de la journée courante (timezone de l'instrument).
+//             2. Convertir son timestamp dans chaque timezone candidate (Europe/Paris, America/New_York, Asia/Tokyo).
+//             3. Si l'heure tombe dans la session EU standard (~09:00 Paris) → CASH_EU.
+//                Si dans la session US standard (~09:30 NY)                  → CASH_US.
+//                Si dans la session Asia standard (~08:00 Tokyo)             → CASH_ASIA.
+//                Sinon (instrument H24)                                      → NON_CASH.
+//             4. Mettre le résultat en cache via `var` car la classification est stable sur la durée du chart.
+//
+// @returns MarketType (toujours NON_CASH dans la v1 stub).
+export detect() =>
+    // TODO Implémenter la détection complète quand Levels arrive.
+    MarketType.NON_CASH

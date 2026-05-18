@@ -28,21 +28,32 @@ Tous les calculs y sont gérés pour des raisons de maintenabilitié
 
 Deux jeux de Bollinger sont proposes, chacun activable/desactivable independamment.
 
+**Note importante** : la médiane (SMA centrale) n'est PAS tracée. Seules les bandes outer et (en mode ribbon) inner sont affichées.
+
+**Rendu en mode ribbon** :
+- Bordure **outer** : opaque, couleur de base (gris). Mêmes linestyle et linewidth qu'en simple.
+- Bordure **inner** : même linestyle que l'outer, linewidth 1px, **transparence 50** pour distinguer de l'outer sans surcharger.
+- **Fill entre outer et inner** :
+  - Bande **ouverte** : couleur de base à transparence 85 (très atténué)
+  - Bande **plate / en fermeture** : couleur bull/bear à transparence 70 (lisible, plus marqué que l'ouvert)
+
 #### Bollinger Classique
 
-- **SMA** : 20 periodes
-- **Bandes externes** (outer) : ecart-type x2.5
+- **SMA** : 20 periodes (non tracée)
+- **Bandes externes** (outer) : ecart-type x2.5, 1px
 - **Bandes internes** (inner) : ecart-type x2.0
 - **Mode** : `simple` (une seule ligne par bande) ou `ribbon` (remplissage entre bande interne et externe)
+- **Style de ligne** : `solid` / `dashed` / `dotted` (défaut solid)
 - **Couleur par defaut** : `#9c9c9c` (gris)
 - **Actif par defaut** : oui, en mode `ribbon`
 
 #### Bollinger Magique
 
-- **SMA** : 160 periodes
-- **Bandes externes** (outer) : ecart-type x2.8
+- **SMA** : 160 periodes (non tracée)
+- **Bandes externes** (outer) : ecart-type x2.8, 2px
 - **Bandes internes** (inner) : ecart-type x2.5
 - **Mode** : `simple` ou `ribbon`
+- **Style de ligne** : `solid` / `dashed` / `dotted` (défaut solid)
 - **Couleur par defaut** : `#808080` (gris fonce)
 - **Actif par defaut** : oui, en mode `simple`
 
@@ -64,14 +75,14 @@ Fonctionnalite transversale aux deux Bollinger. Detecte quand une bande est **pl
 
 ### 2. Moyennes Mobiles
 
-Quatre SMA disponibles. Chacune a un toggle on/off, une couleur, et un mode (`simple` / `ribbon`). Le ruban est construit avec un ecart-type de 0.236 autour de la SMA.
+Quatre SMA disponibles. Chacune a un toggle on/off, une couleur, un mode (`simple` / `ribbon`) et un style de ligne (`solid` / `dashed` / `dotted`). Le ruban est construit avec un ecart-type de 0.236 autour de la SMA.
 
-| MA | Periodes | Epaisseur | Defaut on | Couleur defaut |
-|----|----------|-----------|-----------|----------------|
-| MA7 | 7 | 1px | non | bleu clair / aqua |
-| MA20 | 20 | 2px | non | bleu |
-| MA50 | 50 | 3px | oui | orange |
-| MA200 | 200 | 4px | non | gris |
+| MA | Periodes | Epaisseur | Style defaut | Defaut on | Couleur defaut |
+|----|----------|-----------|--------------|-----------|----------------|
+| MA7 | 7 | 1px | dashed | non | bleu clair / aqua |
+| MA20 | 20 | 1px | solid | non | bleu |
+| MA50 | 50 | 2px | solid | oui | orange |
+| MA200 | 200 | 2px | dashed | non | gris |
 
 ### 3. Ichimoku
 
@@ -80,14 +91,14 @@ Parametres traditionnels (9/26/52). Deux modes d'affichage :
 - **Chikou uniquement** : seule la Chikou Span est affichee
 
 **Chikou Span** : decalee de 26 periodes dans le passe.
-**Senkou A/B** : decalees de 26 periodes dans le futur. Couleur dynamique : la Senkou au-dessus prend la couleur bull, celle en-dessous la couleur bear.
+**Senkou A/B** : decalees de 26 periodes dans le futur. Couleur dynamique : la Senkou au-dessus prend la couleur bull, celle en-dessous la couleur bear. **Lignes du nuage atténuées** (transparence 60) pour ne pas surcharger visuellement.
 **Nuage** : remplissage entre Senkou A et B, bleu si A > B (haussier), jaune si B > A (baissier). Transparence 85%.
 
 | Setting | Type | Defaut |
 |---------|------|--------|
 | Afficher Ichimoku | bool | true |
 | Chikou Uniquement | bool | false |
-| Couleur Tenkan | color | jaune |
+| Couleur Tenkan | color | jaune moutarde (#d4a017) |
 | Couleur Kijun | color | bleu |
 | Couleur Chikou | color | noir |
 
@@ -95,6 +106,8 @@ Parametres traditionnels (9/26/52). Deux modes d'affichage :
 
 Utilise `ta.supertrend` natif, ATR Period = 10, multiplicateur = 3.
 Direction normalisee : 1 = haussier, -1 = baissier.
+
+**Rendu** : ligne de 2px, brisée à chaque changement de direction (la barre de bascule baissier↔haussier injecte un `na` et `plot.style_linebr` empêche le bridging visuel). Couleur bull si direction = 1, bear sinon.
 
 | Setting | Type | Defaut | Plage |
 |---------|------|--------|-------|

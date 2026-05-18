@@ -1,0 +1,53 @@
+//@version=6
+// @description lib-draw — primitives de rendu : styles, couleurs, helpers. Couche 2 (aucune logique métier, dessine ce qu'on lui passe).
+library("lib_draw", overlay = true)
+
+// ============================================================
+// Styles de ligne
+// ============================================================
+
+// @function Convertit un nom de style ("solid", "dashed", "dotted") en constante Pine `line.style_*`
+//           pour les objets `line.new()` et `hline()`. Insensible à la casse, défaut "solid".
+// @param name Nom du style.
+// @returns Constante de style de ligne pour line.new.
+export lineStyle(simple string name) =>
+    s = str.lower(name)
+    s == "dashed" ? line.style_dashed : s == "dotted" ? line.style_dotted : line.style_solid
+
+// @function Convertit un nom de style ("solid", "dashed", "dotted") en constante Pine `plot.linestyle_*`
+//           pour les appels à `plot()`. Insensible à la casse, défaut "solid".
+//           NB : c'est un ENUM différent de `line.style_*` ; ne pas confondre.
+//           IMPORTANT — param qualifier `input` : `plot()` exige un `input plot_line_style` pour son
+//           paramètre `linestyle` (CE10123). Un `simple string` ferait retourner `simple` et serait rejeté.
+//           HISTORIQUE — v2 publiée avec `simple string` (signature buggée, non utilisable dans `plot()`).
+//                        Corrigée ici sur disque ; deviendra effective au prochain republish (v3+).
+// @param name Nom du style.
+// @returns Constante de style de ligne pour plot.
+export plotLineStyle(input string name) =>
+    s = str.lower(name)
+    s == "dashed" ? plot.linestyle_dashed : s == "dotted" ? plot.linestyle_dotted : plot.linestyle_solid
+
+// ============================================================
+// Couleurs
+// ============================================================
+
+// @function Applique une transparence à une couleur (0 = opaque, 100 = invisible).
+// @param c     Couleur source.
+// @param alpha Transparence Pine (0-100).
+// @returns Nouvelle couleur avec la transparence appliquée.
+export withAlpha(series color c, simple int alpha) =>
+    color.new(c, alpha)
+
+// @function Couleur d'une bande Bollinger selon son état (plate / en fermeture) et son côté (haute / basse).
+//           Quand la bande est ouverte → baseColor. Quand elle est plate ou en fermeture → bull (bande basse)
+//           ou bear (bande haute). Note : `isFlat` et `isClosing` sont supposés mutuellement exclusifs
+//           (cf. lib-ma.isFlatSeries / isClosingSeries) mais l'union est tolérée.
+// @param baseColor Couleur par défaut (bande ouverte).
+// @param bullColor Couleur appliquée à une bande basse plate/en fermeture.
+// @param bearColor Couleur appliquée à une bande haute plate/en fermeture.
+// @param isFlat    Bande plate ?
+// @param isClosing Bande en fermeture ?
+// @param isUpper   true = bande supérieure, false = bande inférieure.
+// @returns color
+export bandColor(series color baseColor, series color bullColor, series color bearColor, series bool isFlat, series bool isClosing, simple bool isUpper) =>
+    isFlat or isClosing ? (isUpper ? bearColor : bullColor) : baseColor

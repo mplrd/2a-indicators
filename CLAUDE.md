@@ -21,19 +21,20 @@ Découpage en **3 couches**. Objectif : qu'une stratégie (à venir) puisse impo
 indicators/
 ├── tradingview/
 │   │  --- Couche 0 : fondations (types & utils) ---
-│   ├── lib-time.pine        # Timezones, isNewDay, sessions, sessionStart/End, isFirstH1OfDay
-│   ├── lib-market.pine      # Détection cashEU / cashUS / cashAsia / nonCash         (dep: lib-time)
-│   ├── lib-zone.pine        # UDT Zone, overlap, contains, expired, helpers FIFO
+│   ├── lib-time.pine        # Timezones, isNewDay, Session UDT, sessionStart/End
+│   ├── lib-market.pine      # Détection cashEU / cashUS / cashAsia / nonCash        (dep: lib-time)
+│   ├── lib-zone.pine        # UDT Zone, overlap, contains, cycle de vie, FIFO
+│   ├── lib-series.pine      # slope%, isFlatSeries, isClosingSeries (analytics génériques)
 │   │
 │   │  --- Couche 1 : signaux & calculs purs (importable par les stratégies) ---
-│   ├── lib-ma.pine          # SMA, slope%, isFlatSeries, ribbon (SMA ± std)
-│   ├── lib-bollinger.pine   # BB inner/outer, bandState (open/flat/closing)         (dep: lib-ma)
+│   ├── lib-bollinger.pine   # BB inner/outer
+│   ├── lib-ma.pine          # SMA, ribbon (SMA ± std)                                (dep: lib-bollinger)
 │   ├── lib-ichimoku.pine    # Tenkan / Kijun / Senkou A&B / Chikou
 │   ├── lib-supertrend.pine  # Line + dir normalisée ±1
-│   ├── lib-cmi.pine         # Signal bull/bear, validation 3 bougies, construit Zone (dep: lib-zone)
-│   ├── lib-fvg.pine         # Signal, niveaux, comblement, retourne une Zone        (dep: lib-zone)
-│   ├── lib-gap.pine         # Détection gap daily + cycle de vie                    (dep: lib-time)
-│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, IBR               (dep: lib-time)
+│   ├── lib-cmi.pine         # Signal bull/bear, validation 3 bougies, construit Zone (dep: lib-zone, lib-series)
+│   ├── lib-fvg.pine         # Signal, niveaux, comblement, retourne une Zone         (dep: lib-zone)
+│   ├── lib-gap.pine         # Détection gap daily + cycle de vie                     (dep: lib-time)
+│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, IBR                (dep: lib-time, lib-market)
 │   │
 │   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
 │   ├── lib-draw.pine        # Palette, styles, withAlpha, drawLevel, drawBox, fillCloud, FIFO
@@ -63,8 +64,9 @@ indicators/
 
 ### Versioning des libs
 - Chaque lib a sa version publiée TradingView indépendante (`import <publisher>/<libName>/<version>`).
-- Quand une lib bump, propager le `/<version>` dans **toutes** les libs/indicateurs qui l'importent.
-- Le tableau de versions vit dans `docs/LIBS.md` (créé au premier publish).
+- **`docs/LIBS.md` est la SOURCE DE VÉRITÉ** pour le publisher et les versions publiées. À consulter SYSTÉMATIQUEMENT avant d'écrire ou de modifier un `import` Pine. Ne jamais inventer une version ni laisser un placeholder `<publisher>` ou `/<n>` si LIBS.md a la valeur réelle.
+- Quand une lib bump, propager le `/<version>` dans **toutes** les libs/indicateurs qui l'importent ET mettre à jour `docs/LIBS.md` (cf. `/delivery-plan`).
+- Si une lib n'est pas encore publiée (statut `_non publié_` dans LIBS.md), garder son `import` commenté dans les consommateurs avec un TODO.
 
 ## Conventions
 - Code et identifiants : **anglais** (variables, fonctions, types, commentaires Pine)
@@ -89,6 +91,7 @@ indicators/
 ## Git Workflow
 - Jamais de commit, push ou opération git destructive sans demande explicite de l'utilisateur
 - L'utilisateur contrôle toutes les opérations git
+- **Avant TOUTE proposition de merge ou de PR** vers `develop` ou `main`, invoquer `/delivery-plan` pour générer la checklist de livraison TradingView (publish/bump des libs, propagation des imports, validation chart). Ne pas merger tant que la checklist n'a pas été présentée et que le user n'a pas confirmé les publications.
 
 ## Règles d'architecture Pine
 - Les calculs lourds (boucles, `request.security`, parcours d'arrays) doivent être confinés ; éviter de les exécuter à chaque barre quand ce n'est pas nécessaire
@@ -157,5 +160,7 @@ Les futures cibles (cTrader, MetaTrader, PRT) n'ont **pas** d'équivalent direct
 - `/doc-feature` — génère/maj doc française d'une feature dans `docs/`
 - `/update-specs` — met à jour `docs/SPECIFICATIONS.md` quand un comportement change
 - `/check-quality` — audit Pine : conventions, gestion `na`, perf, séparation lib/indicateur
+- `/delivery-plan` — checklist de livraison TradingView (publish libs, bump versions, validation chart). **Obligatoire avant tout merge/PR.**
+- `/lib-published <lib> <version>` — à invoquer dès qu'une lib est publiée/bumpée sur TradingView. Met à jour `docs/LIBS.md` et active/bumpe les imports dans les consommateurs.
 
 Si l'utilisateur demande quelque chose qui mériterait un skill réutilisable, proposer de le créer.
