@@ -1,0 +1,14 @@
+# Claude Code local-only config (per-machine permissions, paths)
+.claude/settings.local.json
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
