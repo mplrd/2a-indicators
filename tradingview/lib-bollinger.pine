@@ -2,6 +2,8 @@
 // @description lib-bollinger — Bandes de Bollinger avec multiplicateurs interne et externe. Couche 1 (calculs purs, ne dessine rien).
 library("lib_bollinger", overlay = true)
 
+import mpilard/lib_series/2 as series
+
 // ============================================================
 // Bandes
 // ============================================================
@@ -14,7 +16,43 @@ library("lib_bollinger", overlay = true)
 // @param multInner Multiplicateur d'écart-type pour la bande interne.
 // @param multOuter Multiplicateur d'écart-type pour la bande externe (≥ multInner).
 // @returns Tuple [basis, innerUpper, innerLower, outerUpper, outerLower].
-export bands(series float src, simple int length, simple float multInner, simple float multOuter) =>
+export bands(
+  series float src,
+  simple int   length,
+  simple float multInner,
+  simple float multOuter) =>
     basis = ta.sma(src, length)
     dev   = ta.stdev(src, length)
-    [basis, basis + multInner * dev, basis - multInner * dev, basis + multOuter * dev, basis - multOuter * dev]
+    iU    = basis + multInner * dev
+    iL    = basis - multInner * dev
+    oU    = basis + multOuter * dev
+    oL    = basis - multOuter * dev
+    [basis, iU, iL, oU, oL]
+
+// ============================================================
+// Projection
+// ============================================================
+
+// @function Projette les bandes de Bollinger `barsAhead` barres dans le futur, sous l'hypothèse
+//           que `src` reste constant à sa valeur courante.
+//           - Basis : projection exacte via `series.projectMean()`.
+//           - Stdev : approximation par la valeur courante (impact marginal pour barsAhead ∈ [1, 5]).
+// @param src       Série source.
+// @param length    Période SMA.
+// @param multInner Multiplicateur d'écart-type inner.
+// @param multOuter Multiplicateur d'écart-type outer.
+// @param barsAhead Nombre de barres à projeter (1, 2, 3, ...).
+// @returns Tuple [basis, innerUpper, innerLower, outerUpper, outerLower] projetés.
+export projectBands(
+  series float src,
+  simple int   length,
+  simple float multInner,
+  simple float multOuter,
+  simple int   barsAhead) =>
+    basis = series.projectMean(src, length, barsAhead)
+    dev   = ta.stdev(src, length)
+    iU    = basis + multInner * dev
+    iL    = basis - multInner * dev
+    oU    = basis + multOuter * dev
+    oL    = basis - multOuter * dev
+    [basis, iU, iL, oU, oL]

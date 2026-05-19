@@ -13,9 +13,9 @@
 | `lib-time` | 0 | _non publié_ | — | — | scaffold dispo |
 | `lib-market` | 0 | _non publié_ | — | `lib-time` | scaffold stub (`detect()` retourne `NON_CASH`) |
 | `lib-zone` | 0 | _non publié_ | — | — | scaffold dispo |
-| `lib-series` | 0 | **`1`** | 2026-05-18 | — | publié |
-| `lib-bollinger` | 1 | **`1`** | 2026-05-18 | — | publié |
-| `lib-ma` | 1 | **`1`** | 2026-05-18 | `lib-bollinger` v1 | publié, ribbon délègue à `bb.bands` |
+| `lib-series` | 0 | **`2`** | 2026-05-19 | — | publié (v2 ajoute `projectMean()`) |
+| `lib-bollinger` | 1 | **`2`** | 2026-05-19 | `lib-series` v2 | publié (v2 ajoute `projectBands()`, signatures multi-ligne) |
+| `lib-ma` | 1 | **`2`** | 2026-05-19 | `lib-bollinger` v1, `lib-series` v2 | publié (v2 ajoute `projectSMA()`) |
 | `lib-ichimoku` | 1 | **`1`** | 2026-05-18 | — | publié |
 | `lib-supertrend` | 1 | **`1`** | 2026-05-18 | — | publié |
 | `lib-cmi` | 1 | _non publié_ | — | `lib-zone`, `lib-series` | — |
@@ -30,9 +30,9 @@
 Ce bloc reflète l'**état réel** publié — n'inclut PAS les libs `_non publié_`.
 
 ```pinescript
-import mpilard/lib_series/1     as series
-import mpilard/lib_bollinger/1  as bb
-import mpilard/lib_ma/1         as ma
+import mpilard/lib_series/2     as series
+import mpilard/lib_bollinger/2  as bb
+import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
 import mpilard/lib_draw/3       as draw

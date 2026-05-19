@@ -5,6 +5,7 @@
 library("lib_ma", overlay = true)
 
 import mpilard/lib_bollinger/1 as bb
+import mpilard/lib_series/2    as series
 
 // ============================================================
 // Ruban autour d'une SMA
@@ -20,3 +21,17 @@ import mpilard/lib_bollinger/1 as bb
 export ribbon(series float src, simple int length, simple float stdFactor = 0.236) =>
     [basis, upper, lower, _outerU, _outerL] = bb.bands(src, length, stdFactor, stdFactor)
     [basis, upper, lower]
+
+// ============================================================
+// Projection
+// ============================================================
+
+// @function Projette la SMA `barsAhead` barres dans le futur (hypothèse close constant).
+//           Wrapper de cohérence : délègue à `series.projectMean()`. Pour s'aligner sur la nomenclature
+//           lib-ma (SMA) tout en réutilisant la logique générique en Couche 0.
+// @param src       Série source.
+// @param length    Période SMA.
+// @param barsAhead Nombre de barres à projeter.
+// @returns series float — valeur projetée de la SMA.
+export projectSMA(series float src, simple int length, simple int barsAhead) =>
+    series.projectMean(src, length, barsAhead)

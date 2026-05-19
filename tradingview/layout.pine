@@ -5,9 +5,9 @@ indicator("2Ai Layout", shorttitle = "2Ai Layout", overlay = true, max_lines_cou
 // ============================================================
 // Imports
 // ============================================================
-import mpilard/lib_series/1     as series
-import mpilard/lib_bollinger/1  as bb
-import mpilard/lib_ma/1         as ma
+import mpilard/lib_series/2     as series
+import mpilard/lib_bollinger/2  as bb
+import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
 import mpilard/lib_draw/3       as draw
@@ -38,15 +38,17 @@ flatEnabled   = input.bool(true,   "Bandes Plates : ", inline = "flat_detection"
 flatPeriod    = input.int(2,       "Période",          inline = "flat_detection", group = bollingerGroup, minval = 1,     maxval = 20)
 flatThreshold = input.float(0.015, "Seuil %",          inline = "flat_detection", group = bollingerGroup, minval = 0.001, maxval = 1.0, step = 0.001)
 
+projectBB = input.bool(true, "Projeter les bandes", inline = "bb_projection", group = bollingerGroup)
+
 // --- Moyennes Mobiles ---
 var maGroup = "Moyennes Mobiles"
 
-ma7Enabled   = input.bool(false,                     "MA7",   inline = "ma7", group = maGroup)
+ma7Enabled   = input.bool(true,                      "MA7",   inline = "ma7", group = maGroup)
 ma7Color     = input.color(color.aqua,               "",      inline = "ma7", group = maGroup)
 ma7Mode      = input.string("simple",                "",      inline = "ma7", group = maGroup, options = ["simple", "ribbon"])
 ma7LineStyle = input.enum(draw.LineStyle.DASHED,     "",      inline = "ma7", group = maGroup)
 
-ma20Enabled   = input.bool(false,                    "MA20",  inline = "ma20", group = maGroup)
+ma20Enabled   = input.bool(true,                     "MA20",  inline = "ma20", group = maGroup)
 ma20Color     = input.color(color.blue,              "",      inline = "ma20", group = maGroup)
 ma20Mode      = input.string("simple",               "",      inline = "ma20", group = maGroup, options = ["simple", "ribbon"])
 ma20LineStyle = input.enum(draw.LineStyle.SOLID,     "",      inline = "ma20", group = maGroup)
@@ -56,16 +58,18 @@ ma50Color     = input.color(color.orange,            "",      inline = "ma50", g
 ma50Mode      = input.string("simple",               "",      inline = "ma50", group = maGroup, options = ["simple", "ribbon"])
 ma50LineStyle = input.enum(draw.LineStyle.SOLID,     "",      inline = "ma50", group = maGroup)
 
-ma200Enabled   = input.bool(false,                   "MA200", inline = "ma200", group = maGroup)
+ma200Enabled   = input.bool(true,                    "MA200", inline = "ma200", group = maGroup)
 ma200Color     = input.color(color.gray,             "",      inline = "ma200", group = maGroup)
 ma200Mode      = input.string("simple",              "",      inline = "ma200", group = maGroup, options = ["simple", "ribbon"])
 ma200LineStyle = input.enum(draw.LineStyle.DASHED,   "",      inline = "ma200", group = maGroup)
+
+projectMA = input.bool(true, "Projeter les MM", inline = "ma_projection", group = maGroup)
 
 // --- Ichimoku ---
 var ichimokuGroup = "Ichimoku"
 
 ichiEnabled    = input.bool(true,          "Afficher Ichimoku", inline = "ichimoku_toggle", group = ichimokuGroup)
-ichiChikouOnly = input.bool(false,         "Chikou Uniquement", inline = "ichimoku_toggle", group = ichimokuGroup)
+ichiChikouOnly = input.bool(true,          "Chikou Uniquement", inline = "ichimoku_toggle", group = ichimokuGroup)
 
 ichiTenkanCol = input.color(#d4a017, "Tenkan", inline = "ichimoku_colors", group = ichimokuGroup)
 ichiKijunCol  = input.color(color.blue,   "Kijun",  inline = "ichimoku_colors", group = ichimokuGroup)
@@ -93,6 +97,7 @@ RIBBON_ALPHA_OPEN = 85     // ribbon BB ouverte : fill quasi invisible (juste co
 RIBBON_ALPHA_FLAT = 70     // ribbon BB plate/fermeture : fill plus marqué (bull/bear lisible)
 RIBBON_ALPHA      = 85     // ribbon MA (un seul état, alpha unique)
 KUMO_ALPHA        = 85
+PROJECT_BARS      = 3      // projection MA/BB : nombre de barres futures (constante, pas un setting)
 
 // Conversion LineStyle → plot.linestyle_* inlinée :
 // `plot(..., linestyle = ...)` exige un `input plot_line_style`, qualifier que Pine n'autorise pas sur
@@ -269,3 +274,54 @@ plot(chikou, "Chikou", color = ichiChikouCol, linewidth = 1, offset = -ICHI_KIJU
 // Rendu — Supertrend
 // ============================================================
 plot(stLineBroken, "Supertrend", color = stColor, linewidth = 2, style = plot.style_linebr, display = stDisplay)
+
+// ============================================================
+// Projection MA / BB (hypothèse : close reste constant sur N barres futures)
+// Dessinée via `line.new` sur la dernière barre uniquement. Refresh à chaque tick live.
+// `line.new` ne consomme PAS le plot count (séparé du budget 64). Limite line objects : 500 — on
+// crée au plus 8 lignes (4 MA basis + 2 BB outer × 2 BBs), bien sous le plafond.
+// Style : couleur et width de l'élément de base, mais TOUJOURS en pointillé pour signaler "projection".
+// ============================================================
+ma7BasisProj   = ma.projectSMA(close, 7,   PROJECT_BARS)
+ma20BasisProj  = ma.projectSMA(close, 20,  PROJECT_BARS)
+ma50BasisProj  = ma.projectSMA(close, 50,  PROJECT_BARS)
+ma200BasisProj = ma.projectSMA(close, 200, PROJECT_BARS)
+[bbcBasisProj, bbcInnerUProj, bbcInnerLProj, bbcOuterUProj, bbcOuterLProj] = bb.projectBands(close, BBC_LEN, BBC_MULT_IN, BBC_MULT_OUT, PROJECT_BARS)
+[bbmBasisProj, bbmInnerUProj, bbmInnerLProj, bbmOuterUProj, bbmOuterLProj] = bb.projectBands(close, BBM_LEN, BBM_MULT_IN, BBM_MULT_OUT, PROJECT_BARS)
+
+var array<line> projLines = array.new<line>()
+
+if barstate.islast
+    // Nettoyage des lignes précédentes (rafraîchies à chaque tick).
+    for ln in projLines
+        line.delete(ln)
+    array.clear(projLines)
+
+    bi    = bar_index
+    biFut = bi + PROJECT_BARS
+
+    // Projection MM
+    if projectMA
+        if ma7Enabled
+            array.push(projLines, line.new(bi, ma7Basis,   biFut, ma7BasisProj,   color = ma7Color,   style = line.style_dotted, width = 1))
+        if ma20Enabled
+            array.push(projLines, line.new(bi, ma20Basis,  biFut, ma20BasisProj,  color = ma20Color,  style = line.style_dotted, width = 1))
+        if ma50Enabled
+            array.push(projLines, line.new(bi, ma50Basis,  biFut, ma50BasisProj,  color = ma50Color,  style = line.style_dotted, width = 2))
+        if ma200Enabled
+            array.push(projLines, line.new(bi, ma200Basis, biFut, ma200BasisProj, color = ma200Color, style = line.style_dotted, width = 2))
+
+    // Projection BB : outer toujours, inner en plus en mode ribbon
+    if projectBB
+        if bbcEnabled
+            array.push(projLines, line.new(bi, bbcOuterU, biFut, bbcOuterUProj, color = bbcColor, style = line.style_dotted, width = 1))
+            array.push(projLines, line.new(bi, bbcOuterL, biFut, bbcOuterLProj, color = bbcColor, style = line.style_dotted, width = 1))
+            if bbcIsRibbon
+                array.push(projLines, line.new(bi, bbcInnerU, biFut, bbcInnerUProj, color = bbcInnerCol, style = line.style_dotted, width = 1))
+                array.push(projLines, line.new(bi, bbcInnerL, biFut, bbcInnerLProj, color = bbcInnerCol, style = line.style_dotted, width = 1))
+        if bbmEnabled
+            array.push(projLines, line.new(bi, bbmOuterU, biFut, bbmOuterUProj, color = bbmColor, style = line.style_dotted, width = 2))
+            array.push(projLines, line.new(bi, bbmOuterL, biFut, bbmOuterLProj, color = bbmColor, style = line.style_dotted, width = 2))
+            if bbmIsRibbon
+                array.push(projLines, line.new(bi, bbmInnerU, biFut, bbmInnerUProj, color = bbmInnerCol, style = line.style_dotted, width = 1))
+                array.push(projLines, line.new(bi, bbmInnerL, biFut, bbmInnerLProj, color = bbmInnerCol, style = line.style_dotted, width = 1))
