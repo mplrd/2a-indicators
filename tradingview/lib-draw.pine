@@ -3,29 +3,33 @@
 library("lib_draw", overlay = true)
 
 // ============================================================
-// Styles de ligne
+// Styles de ligne — enum + helpers
 // ============================================================
 
-// @function Convertit un nom de style ("solid", "dashed", "dotted") en constante Pine `line.style_*`
-//           pour les objets `line.new()` et `hline()`. Insensible à la casse, défaut "solid".
-// @param name Nom du style.
-// @returns Constante de style de ligne pour line.new.
-export lineStyle(simple string name) =>
-    s = str.lower(name)
-    s == "dashed" ? line.style_dashed : s == "dotted" ? line.style_dotted : line.style_solid
+// @enum LineStyle — Style de ligne pour `line.new()`, `hline()` et `plot()`.
+//                   Les titres de membres sont les symboles ASCII utilisés dans les dropdowns Pine
+//                   (`input.enum()`) afin que l'utilisateur visualise directement le style choisi.
+export enum LineStyle
+    SOLID  = "⎯⎯⎯"
+    DASHED = "----"
+    DOTTED = "····"
 
-// @function Convertit un nom de style ("solid", "dashed", "dotted") en constante Pine `plot.linestyle_*`
-//           pour les appels à `plot()`. Insensible à la casse, défaut "solid".
-//           NB : c'est un ENUM différent de `line.style_*` ; ne pas confondre.
-//           IMPORTANT — param qualifier `input` : `plot()` exige un `input plot_line_style` pour son
-//           paramètre `linestyle` (CE10123). Un `simple string` ferait retourner `simple` et serait rejeté.
-//           HISTORIQUE — v2 publiée avec `simple string` (signature buggée, non utilisable dans `plot()`).
-//                        Corrigée ici sur disque ; deviendra effective au prochain republish (v3+).
-// @param name Nom du style.
-// @returns Constante de style de ligne pour plot.
-export plotLineStyle(input string name) =>
-    s = str.lower(name)
-    s == "dashed" ? plot.linestyle_dashed : s == "dotted" ? plot.linestyle_dotted : plot.linestyle_solid
+// @function Convertit une valeur `LineStyle` en constante Pine `line.style_*` pour `line.new()` / `hline()`.
+//           `line.new()` accepte un style en `series`, donc un retour `simple` depuis une lib passe sans souci.
+// @param s Style désiré.
+// @returns Constante de style de ligne pour line.new.
+export lineStyle(simple LineStyle s = LineStyle.SOLID) =>
+    s == LineStyle.DASHED ? line.style_dashed : s == LineStyle.DOTTED ? line.style_dotted : line.style_solid
+
+// NB — pas d'équivalent `plotLineStyle()` exportable depuis cette lib :
+//      `plot(..., linestyle = ...)` exige un `input plot_line_style`. Or Pine n'autorise pas le
+//      qualifier `input` sur les params d'exports de lib (CE10160) — seuls `simple` et `series` sont
+//      acceptés. Un wrapper de lib retourne donc `simple`, refusé par `plot()` (CE10123).
+//      Conséquence : la conversion `LineStyle` → `plot.linestyle_*` doit rester INLINE dans l'indicateur.
+//      Pattern type-safe côté indicateur :
+//          myLS = myEnumInput == draw.LineStyle.DASHED ? plot.linestyle_dashed :
+//                 myEnumInput == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+//      Ça reste robuste car on compare contre des membres d'enum (pas des strings magiques).
 
 // ============================================================
 // Couleurs

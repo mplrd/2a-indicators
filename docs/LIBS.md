@@ -22,7 +22,7 @@
 | `lib-fvg` | 1 | _non publié_ | — | `lib-zone` | — |
 | `lib-gap` | 1 | _non publié_ | — | `lib-time` | — |
 | `lib-levels` | 1 | _non publié_ | — | `lib-time`, `lib-market` | — |
-| `lib-draw` | 2 | **`2`** | 2026-05-18 | — | publié (v2 ajoute `plotLineStyle`) |
+| `lib-draw` | 2 | **`3`** | 2026-05-19 | — | publié (v3 ajoute `enum LineStyle` + `lineStyle()` typé, retire `plotLineStyle()` — non implémentable en lib, cf. CE10160) |
 | `lib-zone-draw` | 2 | _non publié_ | — | `lib-zone`, `lib-draw` | — |
 
 ## Imports actifs (à copier-coller)
@@ -35,7 +35,7 @@ import mpilard/lib_bollinger/1  as bb
 import mpilard/lib_ma/1         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_draw/2       as draw
+import mpilard/lib_draw/3       as draw
 ```
 
 Les libs non publiées (`lib_time`, `lib_market`, `lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_levels`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.

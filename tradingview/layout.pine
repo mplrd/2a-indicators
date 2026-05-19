@@ -10,7 +10,7 @@ import mpilard/lib_bollinger/1  as bb
 import mpilard/lib_ma/1         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_draw/2       as draw
+import mpilard/lib_draw/3       as draw
 
 // ============================================================
 // Inputs — UI organisée façon legacy : un inline= par feature, titres vides après le 1er, dropdown
@@ -24,15 +24,15 @@ bearColor = input.color(color.red,   "Couleur Baissière", inline = "colors", gr
 // --- Bandes de Bollinger ---
 var bollingerGroup = "Bandes de Bollinger"
 
-bbcEnabled   = input.bool(true,        "Bollinger Classique", inline = "classic_bb", group = bollingerGroup)
-bbcColor     = input.color(#9c9c9c,    "",                    inline = "classic_bb", group = bollingerGroup)
-bbcMode      = input.string("ribbon",  "",                    inline = "classic_bb", group = bollingerGroup, options = ["simple", "ribbon"])
-bbcLineStyle = input.string("⎯⎯⎯",  "",                    inline = "classic_bb", group = bollingerGroup, options = ["⎯⎯⎯", "----", "····"])
+bbcEnabled   = input.bool(true,                       "Bollinger Classique", inline = "classic_bb", group = bollingerGroup)
+bbcColor     = input.color(#9c9c9c,                   "",                    inline = "classic_bb", group = bollingerGroup)
+bbcMode      = input.string("ribbon",                 "",                    inline = "classic_bb", group = bollingerGroup, options = ["simple", "ribbon"])
+bbcLineStyle = input.enum(draw.LineStyle.SOLID,       "",                    inline = "classic_bb", group = bollingerGroup)
 
-bbmEnabled   = input.bool(true,        "Bollinger Magique",   inline = "magic_bb", group = bollingerGroup)
-bbmColor     = input.color(#808080,    "",                    inline = "magic_bb", group = bollingerGroup)
-bbmMode      = input.string("simple",  "",                    inline = "magic_bb", group = bollingerGroup, options = ["simple", "ribbon"])
-bbmLineStyle = input.string("⎯⎯⎯",  "",                    inline = "magic_bb", group = bollingerGroup, options = ["⎯⎯⎯", "----", "····"])
+bbmEnabled   = input.bool(true,                       "Bollinger Magique",   inline = "magic_bb", group = bollingerGroup)
+bbmColor     = input.color(#808080,                   "",                    inline = "magic_bb", group = bollingerGroup)
+bbmMode      = input.string("simple",                 "",                    inline = "magic_bb", group = bollingerGroup, options = ["simple", "ribbon"])
+bbmLineStyle = input.enum(draw.LineStyle.SOLID,       "",                    inline = "magic_bb", group = bollingerGroup)
 
 flatEnabled   = input.bool(true,   "Bandes Plates : ", inline = "flat_detection", group = bollingerGroup)
 flatPeriod    = input.int(2,       "Période",          inline = "flat_detection", group = bollingerGroup, minval = 1,     maxval = 20)
@@ -41,25 +41,25 @@ flatThreshold = input.float(0.015, "Seuil %",          inline = "flat_detection"
 // --- Moyennes Mobiles ---
 var maGroup = "Moyennes Mobiles"
 
-ma7Enabled   = input.bool(false,           "MA7",   inline = "ma7", group = maGroup)
-ma7Color     = input.color(color.aqua,     "",      inline = "ma7", group = maGroup)
-ma7Mode      = input.string("simple",      "",      inline = "ma7", group = maGroup, options = ["simple", "ribbon"])
-ma7LineStyle = input.string("----",        "",      inline = "ma7", group = maGroup, options = ["⎯⎯⎯", "----", "····"])
+ma7Enabled   = input.bool(false,                     "MA7",   inline = "ma7", group = maGroup)
+ma7Color     = input.color(color.aqua,               "",      inline = "ma7", group = maGroup)
+ma7Mode      = input.string("simple",                "",      inline = "ma7", group = maGroup, options = ["simple", "ribbon"])
+ma7LineStyle = input.enum(draw.LineStyle.DASHED,     "",      inline = "ma7", group = maGroup)
 
-ma20Enabled   = input.bool(false,          "MA20",  inline = "ma20", group = maGroup)
-ma20Color     = input.color(color.blue,    "",      inline = "ma20", group = maGroup)
-ma20Mode      = input.string("simple",     "",      inline = "ma20", group = maGroup, options = ["simple", "ribbon"])
-ma20LineStyle = input.string("⎯⎯⎯",    "",      inline = "ma20", group = maGroup, options = ["⎯⎯⎯", "----", "····"])
+ma20Enabled   = input.bool(false,                    "MA20",  inline = "ma20", group = maGroup)
+ma20Color     = input.color(color.blue,              "",      inline = "ma20", group = maGroup)
+ma20Mode      = input.string("simple",               "",      inline = "ma20", group = maGroup, options = ["simple", "ribbon"])
+ma20LineStyle = input.enum(draw.LineStyle.SOLID,     "",      inline = "ma20", group = maGroup)
 
-ma50Enabled   = input.bool(true,           "MA50",  inline = "ma50", group = maGroup)
-ma50Color     = input.color(color.orange,  "",      inline = "ma50", group = maGroup)
-ma50Mode      = input.string("simple",     "",      inline = "ma50", group = maGroup, options = ["simple", "ribbon"])
-ma50LineStyle = input.string("⎯⎯⎯",    "",      inline = "ma50", group = maGroup, options = ["⎯⎯⎯", "----", "····"])
+ma50Enabled   = input.bool(true,                     "MA50",  inline = "ma50", group = maGroup)
+ma50Color     = input.color(color.orange,            "",      inline = "ma50", group = maGroup)
+ma50Mode      = input.string("simple",               "",      inline = "ma50", group = maGroup, options = ["simple", "ribbon"])
+ma50LineStyle = input.enum(draw.LineStyle.SOLID,     "",      inline = "ma50", group = maGroup)
 
-ma200Enabled   = input.bool(false,         "MA200", inline = "ma200", group = maGroup)
-ma200Color     = input.color(color.gray,   "",      inline = "ma200", group = maGroup)
-ma200Mode      = input.string("simple",    "",      inline = "ma200", group = maGroup, options = ["simple", "ribbon"])
-ma200LineStyle = input.string("----",      "",      inline = "ma200", group = maGroup, options = ["⎯⎯⎯", "----", "····"])
+ma200Enabled   = input.bool(false,                   "MA200", inline = "ma200", group = maGroup)
+ma200Color     = input.color(color.gray,             "",      inline = "ma200", group = maGroup)
+ma200Mode      = input.string("simple",              "",      inline = "ma200", group = maGroup, options = ["simple", "ribbon"])
+ma200LineStyle = input.enum(draw.LineStyle.DASHED,   "",      inline = "ma200", group = maGroup)
 
 // --- Ichimoku ---
 var ichimokuGroup = "Ichimoku"
@@ -94,14 +94,16 @@ RIBBON_ALPHA_FLAT = 70     // ribbon BB plate/fermeture : fill plus marqué (bul
 RIBBON_ALPHA      = 85     // ribbon MA (un seul état, alpha unique)
 KUMO_ALPHA        = 85
 
-// Styles de ligne. Conversion inlinée pour préserver le qualifier `input plot_line_style` exigé par
-// `plot()`. Valeurs symboliques cohérentes avec l'UI ("⎯⎯⎯" / "----" / "····").
-bbcLS    = bbcLineStyle    == "----" ? plot.linestyle_dashed : bbcLineStyle    == "····" ? plot.linestyle_dotted : plot.linestyle_solid
-bbmLS    = bbmLineStyle    == "----" ? plot.linestyle_dashed : bbmLineStyle    == "····" ? plot.linestyle_dotted : plot.linestyle_solid
-ma7LS    = ma7LineStyle    == "----" ? plot.linestyle_dashed : ma7LineStyle    == "····" ? plot.linestyle_dotted : plot.linestyle_solid
-ma20LS   = ma20LineStyle   == "----" ? plot.linestyle_dashed : ma20LineStyle   == "····" ? plot.linestyle_dotted : plot.linestyle_solid
-ma50LS   = ma50LineStyle   == "----" ? plot.linestyle_dashed : ma50LineStyle   == "····" ? plot.linestyle_dotted : plot.linestyle_solid
-ma200LS  = ma200LineStyle  == "----" ? plot.linestyle_dashed : ma200LineStyle  == "····" ? plot.linestyle_dotted : plot.linestyle_solid
+// Conversion LineStyle → plot.linestyle_* inlinée :
+// `plot(..., linestyle = ...)` exige un `input plot_line_style`, qualifier que Pine n'autorise pas sur
+// les params d'exports de lib (CE10160). Impossible donc de wrapper dans `lib_draw`. La comparaison
+// se fait contre les membres d'enum `draw.LineStyle.X` pour rester type-safe.
+bbcLS    = bbcLineStyle    == draw.LineStyle.DASHED ? plot.linestyle_dashed : bbcLineStyle    == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+bbmLS    = bbmLineStyle    == draw.LineStyle.DASHED ? plot.linestyle_dashed : bbmLineStyle    == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma7LS    = ma7LineStyle    == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma7LineStyle    == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma20LS   = ma20LineStyle   == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma20LineStyle   == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma50LS   = ma50LineStyle   == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma50LineStyle   == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma200LS  = ma200LineStyle  == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma200LineStyle  == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
 
 // Display constants pré-calculés (input display, pas de ternary sur la valeur côté plot).
 // Pattern repris du legacy `_tv-indicators/layout.pine` qui parvient à tenir sous 64 plot counts
