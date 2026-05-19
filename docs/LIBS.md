@@ -11,7 +11,7 @@
 | Lib | Couche | Version | Date | Dépendances | Notes |
 |-----|--------|---------|------|-------------|-------|
 | `lib-time` | 0 | **`2`** | 2026-05-19 | — | publié (v2 retire le UDT Session, signatures `simple string sessionStr, simple string tz` directes — cf. memory pine_typing § 4) |
-| `lib-market` | 0 | _non publié_ | — | `lib-time` | scaffold stub (`detect()` retourne `NON_CASH`) |
+| `lib-market` | 0 | **`3`** | 2026-05-19 | — | publié (v3 : `detect()` basé sur `syminfo.type` + `syminfo.timezone` — beaucoup plus fiable que la détection bougies) |
 | `lib-zone` | 0 | _non publié_ | — | — | scaffold dispo |
 | `lib-series` | 0 | **`2`** | 2026-05-19 | — | publié (v2 ajoute `projectMean()`) |
 | `lib-bollinger` | 1 | **`2`** | 2026-05-19 | `lib-series` v2 | publié (v2 ajoute `projectBands()`, signatures multi-ligne) |
@@ -21,8 +21,8 @@
 | `lib-cmi` | 1 | _non publié_ | — | `lib-zone`, `lib-series` | — |
 | `lib-fvg` | 1 | _non publié_ | — | `lib-zone` | — |
 | `lib-gap` | 1 | _non publié_ | — | `lib-time` | — |
-| `lib-levels` | 1 | **`2`** | 2026-05-19 | `lib-time` v2 | publié (v1 : `previousPeriodHL` D/W/M + `ath()` ; v2 : `sessionHL()` H/L journalier par session) |
-| `lib-draw` | 2 | **`7`** | 2026-05-19 | — | publié (v4 `resolveLevelStartAndExtend` ; v5 `drawLevel` ; v6 `drawSessionLevel` ; v7 params `show` passés en `series bool` — accepte les combinaisons avec series) |
+| `lib-levels` | 1 | **`8`** | 2026-05-19 | `lib-time` v2 | publié (v1 `previousPeriodHL` + `ath()` ; v2 `sessionHL()` ; v3 `sessionOpen()` + `sessionIBR()` ; v4-v7 itérations IBR ; v8 `firstH1OfDay()` + `sessionHL/Open` `wasInSession = false` init simple, fix non-affichage Asian) |
+| `lib-draw` | 2 | **`8`** | 2026-05-19 | — | publié (v4 `resolveLevelStartAndExtend` ; v5 `drawLevel` ; v6 `drawSessionLevel` ; v7 params `show` en `series bool` ; v8 `force_overlay = true` sur line.new/label.new pour figer en bar_index space) |
 | `lib-zone-draw` | 2 | _non publié_ | — | `lib-zone`, `lib-draw` | — |
 
 ## Imports actifs (à copier-coller)
@@ -31,16 +31,17 @@ Ce bloc reflète l'**état réel** publié — n'inclut PAS les libs `_non publi
 
 ```pinescript
 import mpilard/lib_time/2       as tm
+import mpilard/lib_market/3     as market
 import mpilard/lib_series/2     as series
 import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_levels/2     as levels
-import mpilard/lib_draw/7       as draw
+import mpilard/lib_levels/8     as levels
+import mpilard/lib_draw/8       as draw
 ```
 
-Les libs non publiées (`lib_market`, `lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
+Les libs non publiées (`lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
 
 ## Workflow de publication
 

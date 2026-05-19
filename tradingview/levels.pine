@@ -5,8 +5,8 @@ indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_cou
 // ============================================================
 // Imports
 // ============================================================
-import mpilard/lib_levels/2 as levels
-import mpilard/lib_draw/7   as draw
+import mpilard/lib_levels/8 as levels
+import mpilard/lib_draw/8   as draw
 
 // ============================================================
 // Inputs
@@ -52,14 +52,40 @@ usColor   = input.color(color.purple,                "",                   inlin
 usStyle   = input.enum(draw.LineStyle.SOLID,         "",                   inline = "us_session",     group = levelsGroup)
 usWidth   = input.int(1,                             "",                   inline = "us_session",     group = levelsGroup, minval = 1, maxval = 5)
 
+// --- Niveaux d'ouverture ---
+// Détection automatique cash / non-cash via lib_market. Les 3 Open toggles (Future/EU/US) sont
+// indépendants — chacun dessine son open si la session correspondante a été observée aujourd'hui.
+// IBR utilise la session cash détectée en mode cash, sinon la Future session en non-cash.
+ibrEnabled = input.bool(true,                        "IBR",                inline = "ibr_level",      group = levelsGroup)
+ibrColor   = input.color(#555555,                    "",                   inline = "ibr_level",      group = levelsGroup)
+ibrStyle   = input.enum(draw.LineStyle.DOTTED,       "",                   inline = "ibr_level",      group = levelsGroup)
+ibrWidth   = input.int(1,                            "",                   inline = "ibr_level",      group = levelsGroup, minval = 1, maxval = 5)
+
+openFutureEnabled = input.bool(true,                  "Open Future",        inline = "open_future",    group = levelsGroup)
+openFutureColor   = input.color(#555555,              "",                   inline = "open_future",    group = levelsGroup)
+openFutureStyle   = input.enum(draw.LineStyle.DOTTED, "",                   inline = "open_future",    group = levelsGroup)
+openFutureWidth   = input.int(1,                      "",                   inline = "open_future",    group = levelsGroup, minval = 1, maxval = 5)
+
+openEUEnabled = input.bool(true,                      "Open EU",            inline = "open_eu",        group = levelsGroup)
+openEUColor   = input.color(color.blue,               "",                   inline = "open_eu",        group = levelsGroup)
+openEUStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_eu",        group = levelsGroup)
+openEUWidth   = input.int(1,                          "",                   inline = "open_eu",        group = levelsGroup, minval = 1, maxval = 5)
+
+openUSEnabled = input.bool(true,                      "Open US",            inline = "open_us",        group = levelsGroup)
+openUSColor   = input.color(color.purple,             "",                   inline = "open_us",        group = levelsGroup)
+openUSStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_us",        group = levelsGroup)
+openUSWidth   = input.int(1,                          "",                   inline = "open_us",        group = levelsGroup, minval = 1, maxval = 5)
+
 // --- Paramètres des Sessions ---
 var sessionParamsGroup = "Paramètres des Sessions"
-asianSessionStr = input.session("0800-1400",     "Asiatique",  inline = "asian_params", group = sessionParamsGroup)
-asianTz         = input.string("Asia/Tokyo",     "",           inline = "asian_params", group = sessionParamsGroup)
-euSessionStr    = input.session("0900-1400",     "Européenne", inline = "eu_params",    group = sessionParamsGroup)
-euTz            = input.string("Europe/Paris",   "",           inline = "eu_params",    group = sessionParamsGroup)
-usSessionStr    = input.session("0930-1600",     "Américaine", inline = "us_params",    group = sessionParamsGroup)
-usTz            = input.string("America/New_York","",          inline = "us_params",    group = sessionParamsGroup)
+asianSessionStr  = input.session("0800-1400",     "Asiatique",  inline = "asian_params",  group = sessionParamsGroup)
+asianTz          = input.string("Asia/Tokyo",     "",           inline = "asian_params",  group = sessionParamsGroup)
+euSessionStr     = input.session("0900-1400",     "Européenne", inline = "eu_params",     group = sessionParamsGroup)
+euTz             = input.string("Europe/Paris",   "",           inline = "eu_params",     group = sessionParamsGroup)
+usSessionStr     = input.session("0930-1600",     "Américaine", inline = "us_params",     group = sessionParamsGroup)
+usTz             = input.string("America/New_York","",          inline = "us_params",     group = sessionParamsGroup)
+futureSessionStr = input.session("0800-0900",     "Future open",inline = "future_params", group = sessionParamsGroup)
+futureTz         = input.string("Europe/Paris",   "",           inline = "future_params", group = sessionParamsGroup)
 
 // ============================================================
 // Filtres TF d'affichage
@@ -89,6 +115,17 @@ pmStartBar = levels.previousPeriodStartBar("M")
 [asianH, asianL, asianStart, asianSeen] = levels.sessionHL(asianSessionStr, asianTz)
 [euH,    euL,    euStart,    euSeen]    = levels.sessionHL(euSessionStr,    euTz)
 [usH,    usL,    usStart,    usSeen]    = levels.sessionHL(usSessionStr,    usTz)
+
+// Opens & IBR par session (calculés en permanence, sélectionnés au rendu).
+[asianOpen,  asianOpenTime,  asianOpenSeen]  = levels.sessionOpen(asianSessionStr,  asianTz)
+[euOpen,     euOpenTime,     euOpenSeen]     = levels.sessionOpen(euSessionStr,     euTz)
+[usOpen,     usOpenTime,     usOpenSeen]     = levels.sessionOpen(usSessionStr,     usTz)
+[futureOpen, futureOpenTime, futureOpenSeen] = levels.sessionOpen(futureSessionStr, futureTz)
+
+// IBR : 1re bougie horaire du jour (dans la TZ naturelle de l'instrument).
+// Règle : la barre où la date change vs la barre précédente est la 1re du jour. C'est tout.
+// Wrap `request.security` sur M1 pour couvrir exactement 60min depuis cette 1re barre, quel que soit le TF.
+[ibrH, ibrL, ibrStart, _ibrSeen] = request.security(syminfo.tickerid, "1", levels.firstH1OfDay())
 
 // ============================================================
 // Rendu — refresh à chaque tick sur la dernière barre
@@ -128,3 +165,13 @@ if barstate.islast
     draw.drawSessionLevel(euEnabled    and showIntraday and euSeen,    euL,    euStart,    euColor,    euWidth,    euStyle,    "EU L",    showLabels, lineArr, labelArr)
     draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usH,    usStart,    usColor,    usWidth,    usStyle,    "US H",    showLabels, lineArr, labelArr)
     draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usL,    usStart,    usColor,    usWidth,    usStyle,    "US L",    showLabels, lineArr, labelArr)
+
+    // Opens : 3 toggles indépendants du mode cash/non-cash. En cash mode, le bon Open XX
+    // affiche de facto l'OPR Open de la session détectée.
+    draw.drawSessionLevel(openFutureEnabled and showIntraday and futureOpenSeen, futureOpen, futureOpenTime, openFutureColor, openFutureWidth, openFutureStyle, "Open Future", showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(openEUEnabled     and showIntraday and euOpenSeen,     euOpen,     euOpenTime,     openEUColor,     openEUWidth,     openEUStyle,     "Open EU",     showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(openUSEnabled     and showIntraday and usOpenSeen,     usOpen,     usOpenTime,     openUSColor,     openUSWidth,     openUSStyle,     "Open US",     showLabels, lineArr, labelArr)
+
+    // IBR : selection auto cash (session détectée) / non-cash (Future).
+    draw.drawSessionLevel(ibrEnabled and showIntraday, ibrH, ibrStart, ibrColor, ibrWidth, ibrStyle, "IBR H", showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(ibrEnabled and showIntraday, ibrL, ibrStart, ibrColor, ibrWidth, ibrStyle, "IBR L", showLabels, lineArr, labelArr)

@@ -91,26 +91,92 @@ export ath() =>
 //          - sStartTime   : timestamp ms de l'ouverture de la session aujourd'hui (`na` sinon).
 //          - seenToday    : true dès qu'une barre intra-session a été observée aujourd'hui.
 export sessionHL(simple string sessionStr, simple string tz) =>
-    var float sH        = na
-    var float sL        = na
-    var int   sStart    = na
-    var bool  seenToday = false
-    var int   currDay   = na
+    var float sH           = na
+    var float sL           = na
+    var int   sStart       = na
+    var bool  seenToday    = false
+    var bool  wasInSession = false
 
-    today = tm.dateInTz(tz)
-    if not na(currDay) and currDay != today
-        // Nouveau jour → reset
-        sH        := na
-        sL        := na
-        sStart    := na
-        seenToday := false
-    currDay := today
-
-    if tm.inSession(sessionStr, tz)
-        if not seenToday
-            sStart    := time
-            seenToday := true
-        sH := na(sH) ? high : math.max(sH, high)
-        sL := na(sL) ? low  : math.min(sL, low)
+    inS = tm.inSession(sessionStr, tz)
+    if inS and not wasInSession
+        sStart    := time
+        sH        := high
+        sL        := low
+        seenToday := true
+    else if inS
+        sH := math.max(sH, high)
+        sL := math.min(sL, low)
+    wasInSession := inS
 
     [sH, sL, sStart, seenToday]
+
+// ============================================================
+// Opens — prix d'ouverture de session
+// ============================================================
+
+// @function Prix d'ouverture de la session pour le jour courant (premier `open` observé pendant la session).
+//           Reset à chaque changement de jour (dans la TZ de la session).
+// @param sessionStr "HHMM-HHMM"
+// @param tz         Timezone IANA.
+// @returns [openPrice, openTime, seenToday]
+//          - openPrice : `open` de la 1re barre intra-session.
+//          - openTime  : timestamp ms de cette 1re barre.
+//          - seenToday : true dès observation d'une barre intra-session aujourd'hui.
+export sessionOpen(simple string sessionStr, simple string tz) =>
+    var float oPrice       = na
+    var int   oTime        = na
+    var bool  seenToday    = false
+    var bool  wasInSession = false
+
+    inS = tm.inSession(sessionStr, tz)
+    if inS and not wasInSession
+        oPrice    := open
+        oTime     := time
+        seenToday := true
+    wasInSession := inS
+
+    [oPrice, oTime, seenToday]
+
+// ============================================================
+// Initial Balance Range (IBR) — H/L de la première heure de session
+// ============================================================
+
+// @function H/L de la PREMIÈRE HEURE de la session (Initial Balance Range).
+//           Tracké pendant 60 minutes à partir de l'ouverture de la session, puis figé.
+//           Reset à chaque changement de jour.
+// @param sessionStr "HHMM-HHMM"
+// @param tz         Timezone IANA.
+// @returns [ibH, ibL, ibStartTime, seenToday]
+//          - ibH, ibL   : high/low cumulés pendant la 1re heure de session.
+//          - ibStartTime: timestamp d'ouverture de la session aujourd'hui.
+//          - seenToday  : true dès observation d'une barre intra-session aujourd'hui.
+// @function H/L de la PREMIÈRE BOUGIE HORAIRE DU JOUR (par rapport au chart, pas à une TZ fixée).
+//           Utilise `session.isfirstbar_regular` — builtin Pine qui détecte la 1re barre de la session
+//           régulière du symbole, telle que TV la définit pour le chart courant. Aucune timezone à
+//           supposer côté code : Pine sait ce qui est le "1er bar du jour" pour cet instrument.
+//
+//           Tracke H/L pendant 60 minutes à partir de cette barre.
+//
+//           Calcul sur TF courante. Pour exactitude indépendante du TF du chart (ex : alignement xxh30
+//           sur FXCM, 9h30 NY sur cash US), wrapper côté indicateur :
+//           `request.security(syminfo.tickerid, "1", levels.firstH1OfDay())`.
+// @returns [ibH, ibL, ibStartTime, seenToday]
+export firstH1OfDay() =>
+    var float ibH       = na
+    var float ibL       = na
+    var int   ibStart   = na
+    var int   ibEnd     = na
+    var bool  seenToday = false
+
+    if session.isfirstbar_regular
+        // 1re barre de la session régulière du jour → init IBR
+        ibStart   := time
+        ibEnd     := time + 3600000  // +60 minutes en ms
+        ibH       := high
+        ibL       := low
+        seenToday := true
+    else if seenToday and not na(ibEnd) and time < ibEnd
+        ibH := math.max(ibH, high)
+        ibL := math.min(ibL, low)
+
+    [ibH, ibL, ibStart, seenToday]

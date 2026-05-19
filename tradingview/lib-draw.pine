@@ -100,13 +100,15 @@ export drawLevel(series bool show, float price, int startBar, bool startBarFound
           x1 = startX, y1 = price, x2 = bar_index + 5, y2 = price,
           xloc = xloc.bar_index, extend = extendMode,
           color = col, width = width,
-          style = styleEnum == LineStyle.DASHED ? line.style_dashed : styleEnum == LineStyle.DOTTED ? line.style_dotted : line.style_solid)
+          style = styleEnum == LineStyle.DASHED ? line.style_dashed : styleEnum == LineStyle.DOTTED ? line.style_dotted : line.style_solid,
+          force_overlay = true)
         array.push(lineArr, ln)
         if showLbl and lbl != ""
             lb = label.new(
               x = bar_index + 20, y = price, text = lbl,
               xloc = xloc.bar_index, style = label.style_none,
-              textcolor = col, size = size.small)
+              textcolor = col, size = size.small,
+              force_overlay = true)
             array.push(labelArr, lb)
     ln
 
@@ -133,12 +135,14 @@ export drawSessionLevel(series bool show, float price, int startTime, simple col
           x1 = startTime, y1 = price, x2 = time + oneBarMs * 5, y2 = price,
           xloc = xloc.bar_time, extend = extend.right,
           color = col, width = width,
-          style = styleEnum == LineStyle.DASHED ? line.style_dashed : styleEnum == LineStyle.DOTTED ? line.style_dotted : line.style_solid)
+          style = styleEnum == LineStyle.DASHED ? line.style_dashed : styleEnum == LineStyle.DOTTED ? line.style_dotted : line.style_solid,
+          force_overlay = true)
         array.push(lineArr, ln)
         if showLbl and lbl != ""
             lb = label.new(
               x = time + oneBarMs * 20, y = price, text = lbl,
               xloc = xloc.bar_time, style = label.style_none,
-              textcolor = col, size = size.small)
+              textcolor = col, size = size.small,
+              force_overlay = true)
             array.push(labelArr, lb)
     ln
