@@ -47,6 +47,23 @@ Mode `ribbon` : trace une enveloppe `SMA ± 0.236 * stdev` autour de la basis, f
 ### Couleurs globales bull / bear
 Inputs à part en haut du panneau "Apparence Globale". Utilisés par : détection bandes plates, Senkou A/B (couleur de la ligne au-dessus / en-dessous), Supertrend. Permet de cohérencer toute la palette de l'indicateur via 2 réglages.
 
+### Projection MA / BB (option)
+Deux toggles séparés, désactivés par défaut :
+- **Projeter les bandes** dans le groupe Bandes de Bollinger
+- **Projeter les MM** dans le groupe Moyennes Mobiles
+
+Quand activé, dessine la projection des éléments correspondants sur les **3 prochaines bougies** (constante figée — pas un setting utilisateur, simplifie l'UX).
+
+- **Hypothèse** : close reste constant sur les 3 barres futures. Pas une prédiction de prix, juste une extrapolation passive (où serait la MA / BB si rien ne bougeait).
+- **Tracé** : un segment pointillé `line.new` (line objects, pas plot) depuis la valeur actuelle vers la valeur projetée. Couleur et largeur identiques à l'élément projeté, style **toujours dotted** pour signaler "estimation".
+- **Composants projetés** :
+  - MM : MA7/20/50/200 basis (uniquement les MM activées)
+  - BB : outer toujours, inner en plus en **mode ribbon** (le mode simple n'affiche pas les inner, on ne les projette donc pas)
+- **Limites** : max 12 line objects par refresh (4 MM + 2 BB × 4 lignes en ribbon). Bien sous le plafond Pine de 500.
+- **Aucun coût plot count** : `line.new` ne consomme pas le budget des 64 plots.
+
+Math et architecture détaillées dans `SPECIFICATIONS.md` § 6.
+
 ## Choix d'implémentation
 
 ### Découpage par couches
@@ -101,6 +118,11 @@ Validation manuelle sur TradingView. À cocher au fur et à mesure.
 | 8 | EURUSD | M5 | Live (laisser tourner 30 minutes) | Aucun repaint des bandes plates / Supertrend en temps réel | ⏳ |
 | 9 | EURUSD | H1 | Toggle BBc off, BBm on | Seule BBm visible, panneau de réglages cohérent | ⏳ |
 | 10 | EURUSD | H1 | Changer linestyle BBc en dashed | Outer + inner BBc dashed, fill inchangé | ⏳ |
+| 11 | EURUSD | H1 | Projeter les MM ON | Segments pointillés MA depuis valeur courante vers `bar_index + 3`, couleur/width identiques à la MA | ⏳ |
+| 12 | EURUSD | H1 | Projeter les bandes ON, mode ribbon BBc | 4 segments BBc (outer + inner upper/lower) + 2 segments BBm outer, en pointillés | ⏳ |
+| 13 | EURUSD | H1 | Projeter les bandes ON, mode simple BBc | Uniquement 2 segments outer BBc (pas d'inner en simple) + idem BBm | ⏳ |
+| 14 | EURUSD | M1 | Projections ON, live (tick-by-tick) | Segments se mettent à jour à chaque tick (close bouge → projection bouge proportionnellement) | ⏳ |
+| 15 | EURUSD | H1 | Toggle ON puis OFF (MM puis bandes) | Les segments correspondants disparaissent immédiatement quand on désactive | ⏳ |
 
 **Non testé / hors scope v1** :
 - Performance sur > 5000 barres historiques (Pine `max_bars_back` plafond).

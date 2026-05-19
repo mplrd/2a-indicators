@@ -79,10 +79,10 @@ Quatre SMA disponibles. Chacune a un toggle on/off, une couleur, un mode (`simpl
 
 | MA | Periodes | Epaisseur | Style defaut | Defaut on | Couleur defaut |
 |----|----------|-----------|--------------|-----------|----------------|
-| MA7 | 7 | 1px | dashed | non | bleu clair / aqua |
-| MA20 | 20 | 1px | solid | non | bleu |
+| MA7 | 7 | 1px | dashed | oui | bleu clair / aqua |
+| MA20 | 20 | 1px | solid | oui | bleu |
 | MA50 | 50 | 2px | solid | oui | orange |
-| MA200 | 200 | 2px | dashed | non | gris |
+| MA200 | 200 | 2px | dashed | oui | gris |
 
 ### 3. Ichimoku
 
@@ -97,7 +97,7 @@ Parametres traditionnels (9/26/52). Deux modes d'affichage :
 | Setting | Type | Defaut |
 |---------|------|--------|
 | Afficher Ichimoku | bool | true |
-| Chikou Uniquement | bool | false |
+| Chikou Uniquement | bool | **true** (par défaut on n'affiche que la Chikou — full Ichimoku sur opt-in) |
 | Couleur Tenkan | color | jaune moutarde (#d4a017) |
 | Couleur Kijun | color | bleu |
 | Couleur Chikou | color | noir |
@@ -121,6 +121,34 @@ Direction normalisee : 1 = haussier, -1 = baissier.
 | Couleur Baissiere | rouge |
 
 Ces couleurs sont utilisees par : Bollinger (bandes plates), Ichimoku (nuage, senkou), Supertrend.
+
+### 6. Projection MA / BB (optionnelle)
+
+Quand activée, l'indicateur prolonge visuellement les MA et/ou BB sur les **3 prochaines bougies** (constante figée, pas exposée au user). Toggle indépendant pour les MA et pour les BB.
+
+**Hypothèse** : `close` reste constant à sa valeur courante sur les 3 barres futures (projection neutre, pas spéculative).
+
+**Math** :
+- SMA projetée à `+k` barres : `SMA(N) + (k · close − Σ_{i=1..k} close[N−i]) / N`. Calcul fermé exact sous l'hypothèse close constant.
+- BB projetée : basis projetée comme ci-dessus, écart-type gardé constant à sa valeur courante (approximation marginale pour `k = 3`).
+
+**Rendu** :
+- Dessiné sur la dernière barre uniquement via `line.new`, rafraîchi à chaque tick live.
+- Segment du point actuel `(bar_index, valeur_courante)` jusqu'à `(bar_index + 3, valeur_projetée)`.
+- Couleur et linewidth de l'élément de base, mais **style toujours pointillé** (`line.style_dotted`) pour distinguer du tracé "réel".
+
+**Composants projetés** :
+- **Si Projeter les MM est ON** : MA7 / MA20 / MA50 / MA200 basis (uniquement celles activées)
+- **Si Projeter les bandes est ON** :
+  - BB Classique outer upper + outer lower (toujours)
+  - BB Classique inner upper + inner lower (uniquement si mode `ribbon`)
+  - BB Magique outer upper + outer lower (toujours)
+  - BB Magique inner upper + inner lower (uniquement si mode `ribbon`)
+
+| Setting | Groupe | Type | Défaut |
+|---------|--------|------|--------|
+| Projeter les bandes | Bandes de Bollinger | bool | **true** |
+| Projeter les MM | Moyennes Mobiles | bool | **true** |
 
 ---
 
