@@ -1,0 +1,90 @@
+//@version=6
+// @description 2Ai Levels — Niveaux de prix passés (Phase 1 : ATH + niveaux de période précédente PDH/PDL, PWH/PWL, PMH/PML).
+indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_levels/1 as levels
+import mpilard/lib_draw/5   as draw
+
+// ============================================================
+// Inputs
+// ============================================================
+
+var levelsGroup = "Niveaux"
+
+showLabels = input.bool(true, "Afficher les labels", inline = "labels", group = levelsGroup)
+
+athEnabled = input.bool(true,                       "ATH", inline = "ath_level", group = levelsGroup)
+athColor   = input.color(#8B0000,                   "",    inline = "ath_level", group = levelsGroup)
+athStyle   = input.enum(draw.LineStyle.DASHED,      "",    inline = "ath_level", group = levelsGroup)
+athWidth   = input.int(2,                           "",    inline = "ath_level", group = levelsGroup, minval = 1, maxval = 5)
+
+dailyEnabled = input.bool(true,                     "Daily (PDH/PDL)", inline = "daily_level", group = levelsGroup)
+dailyColor   = input.color(#555555,                 "",                inline = "daily_level", group = levelsGroup)
+dailyStyle   = input.enum(draw.LineStyle.SOLID,     "",                inline = "daily_level", group = levelsGroup)
+dailyWidth   = input.int(1,                         "",                inline = "daily_level", group = levelsGroup, minval = 1, maxval = 5)
+
+weeklyEnabled = input.bool(true,                    "Weekly (PWH/PWL)", inline = "weekly_level", group = levelsGroup)
+weeklyColor   = input.color(#555555,                "",                 inline = "weekly_level", group = levelsGroup)
+weeklyStyle   = input.enum(draw.LineStyle.SOLID,    "",                 inline = "weekly_level", group = levelsGroup)
+weeklyWidth   = input.int(2,                        "",                 inline = "weekly_level", group = levelsGroup, minval = 1, maxval = 5)
+
+monthlyEnabled = input.bool(true,                   "Monthly (PMH/PML)", inline = "monthly_level", group = levelsGroup)
+monthlyColor   = input.color(#555555,               "",                  inline = "monthly_level", group = levelsGroup)
+monthlyStyle   = input.enum(draw.LineStyle.SOLID,   "",                  inline = "monthly_level", group = levelsGroup)
+monthlyWidth   = input.int(3,                       "",                  inline = "monthly_level", group = levelsGroup, minval = 1, maxval = 5)
+
+// ============================================================
+// Filtres TF d'affichage
+// Règle : un niveau d'une période donnée s'affiche uniquement si la TF courante est <= à cette période.
+// ============================================================
+tfSec       = timeframe.in_seconds()
+showDaily   = tfSec <= timeframe.in_seconds("D")
+showWeekly  = tfSec <= timeframe.in_seconds("W")
+showMonthly = tfSec <= timeframe.in_seconds("M")
+
+// ============================================================
+// Calculs des niveaux
+// ============================================================
+[pdH, pdL] = levels.previousPeriodHL("D")
+[pwH, pwL] = levels.previousPeriodHL("W")
+[pmH, pmL] = levels.previousPeriodHL("M")
+
+pdStartBar = levels.previousPeriodStartBar("D")
+pwStartBar = levels.previousPeriodStartBar("W")
+pmStartBar = levels.previousPeriodStartBar("M")
+
+[athValue, athBar, athBarFound] = levels.ath()
+
+// ============================================================
+// Rendu — refresh à chaque tick sur la dernière barre
+// Dessin délégué à `draw.drawLevel()` (Couche 2). L'indicateur n'orchestre que.
+// ============================================================
+var array<line>  lineArr  = array.new<line>()
+var array<label> labelArr = array.new<label>()
+
+if barstate.islast
+    // Nettoyage des objets précédents
+    for ln in lineArr
+        line.delete(ln)
+    array.clear(lineArr)
+    for lb in labelArr
+        label.delete(lb)
+    array.clear(labelArr)
+
+    // ATH (toujours TF-allowed)
+    draw.drawLevel(athEnabled, athValue, athBar, athBarFound, athColor, athWidth, athStyle, "ATH", showLabels, lineArr, labelArr)
+
+    // PDH / PDL
+    draw.drawLevel(dailyEnabled and showDaily, pdH, pdStartBar, not na(pdStartBar), dailyColor, dailyWidth, dailyStyle, "PDH", showLabels, lineArr, labelArr)
+    draw.drawLevel(dailyEnabled and showDaily, pdL, pdStartBar, not na(pdStartBar), dailyColor, dailyWidth, dailyStyle, "PDL", showLabels, lineArr, labelArr)
+
+    // PWH / PWL
+    draw.drawLevel(weeklyEnabled and showWeekly, pwH, pwStartBar, not na(pwStartBar), weeklyColor, weeklyWidth, weeklyStyle, "PWH", showLabels, lineArr, labelArr)
+    draw.drawLevel(weeklyEnabled and showWeekly, pwL, pwStartBar, not na(pwStartBar), weeklyColor, weeklyWidth, weeklyStyle, "PWL", showLabels, lineArr, labelArr)
+
+    // PMH / PML
+    draw.drawLevel(monthlyEnabled and showMonthly, pmH, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PMH", showLabels, lineArr, labelArr)
+    draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, lineArr, labelArr)

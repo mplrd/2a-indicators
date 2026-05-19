@@ -21,8 +21,8 @@
 | `lib-cmi` | 1 | _non publié_ | — | `lib-zone`, `lib-series` | — |
 | `lib-fvg` | 1 | _non publié_ | — | `lib-zone` | — |
 | `lib-gap` | 1 | _non publié_ | — | `lib-time` | — |
-| `lib-levels` | 1 | _non publié_ | — | `lib-time`, `lib-market` | — |
-| `lib-draw` | 2 | **`3`** | 2026-05-19 | — | publié (v3 ajoute `enum LineStyle` + `lineStyle()` typé, retire `plotLineStyle()` — non implémentable en lib, cf. CE10160) |
+| `lib-levels` | 1 | **`1`** | 2026-05-19 | — | publié (v1 : `previousPeriodHL` D/W/M, `previousPeriodStartTime`, `previousPeriodStartBar`, `ath()` avec gestion ATH hors-fenêtre) |
+| `lib-draw` | 2 | **`5`** | 2026-05-19 | — | publié (v4 : `resolveLevelStartAndExtend()` règle 365 barres ; v5 : `drawLevel()` helper de rendu de niveau) |
 | `lib-zone-draw` | 2 | _non publié_ | — | `lib-zone`, `lib-draw` | — |
 
 ## Imports actifs (à copier-coller)
@@ -35,10 +35,11 @@ import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_draw/3       as draw
+import mpilard/lib_levels/1     as levels
+import mpilard/lib_draw/5       as draw
 ```
 
-Les libs non publiées (`lib_time`, `lib_market`, `lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_levels`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
+Les libs non publiées (`lib_time`, `lib_market`, `lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
 
 ## Workflow de publication
 

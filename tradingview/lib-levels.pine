@@ -1,0 +1,77 @@
+//@version=6
+// @description lib-levels — extraction des niveaux de prix passés : PDH/PDL, PWH/PWL, PMH/PML, ATH.
+//              Couche 1, aucune dépendance lib (utilise uniquement `request.security` + builtins).
+//              Toutes les fonctions sont anti-repaint par construction (lookahead_on + `[1]` sur les
+//              valeurs sourcées du timeframe supérieur).
+library("lib_levels", overlay = true)
+
+// ============================================================
+// Niveaux de période précédente (Daily / Weekly / Monthly)
+// ============================================================
+
+// @function High et Low de la période PRÉCÉDENTE dans le timeframe demandé.
+//           Combinaison anti-repaint standard : on lit `high[1]` / `low[1]` à la TF cible avec
+//           `lookahead_on` — la valeur retournée est figée dès l'ouverture de la période courante.
+// @param tf Timeframe Pine du niveau supérieur ("D" pour daily, "W" pour weekly, "M" pour monthly).
+// @returns [prevHigh, prevLow]
+export previousPeriodHL(simple string tf) =>
+    pH = request.security(syminfo.tickerid, tf, high[1], lookahead = barmerge.lookahead_on)
+    pL = request.security(syminfo.tickerid, tf, low[1],  lookahead = barmerge.lookahead_on)
+    [pH, pL]
+
+// @function Timestamp ms du DÉBUT de la période précédente. Sert à dessiner la ligne du niveau
+//           depuis le bon point d'origine quand on utilise `xloc.bar_time`.
+// @param tf Timeframe Pine du niveau supérieur.
+// @returns int (ms epoch)
+export previousPeriodStartTime(simple string tf) =>
+    request.security(syminfo.tickerid, tf, time[1], lookahead = barmerge.lookahead_on)
+
+// @function Index de barre (`bar_index` de la TF courante) où la période précédente du timeframe
+//           `tf` a commencé. Tracké via `var` à chaque transition de période détectée par
+//           `timeframe.change(tf)`. Utile pour `xloc.bar_index` + extension `right`.
+//           Retourne `na` tant qu'au moins deux transitions n'ont pas été observées.
+// @param tf Timeframe Pine du niveau supérieur.
+// @returns series int — bar_index du début de la période précédente, ou `na`.
+export previousPeriodStartBar(simple string tf) =>
+    var int currStart = na
+    var int prevStart = na
+    if timeframe.change(tf)
+        prevStart := currStart
+        currStart := bar_index
+    prevStart
+
+// ============================================================
+// ATH (All-Time High)
+// ============================================================
+
+// Helper interne : running max du high sur la TF d'évaluation courante.
+// Important : chaque site d'appel a son propre `var` (Pine sémantique), donc cette fonction est
+// réutilisable depuis le contexte chart ET depuis un `request.security("D", ...)` sans collision d'état.
+runningHigh() =>
+    var float h = high
+    if high > h
+        h := high
+    h
+
+// @function Plus haut historique observable, combiné chart-courant + daily-resolution pour étendre
+//           la portée temporelle au-delà des seules barres visibles dans la TF courante.
+//           - `chartMax` = running max du high dans la TF courante.
+//           - `dailyMax` = running max du high à la résolution daily (porte plus loin dans le temps,
+//             notamment quand l'ATH date d'avant la fenêtre `max_bars_back` de la TF courante).
+//           La vraie ATH = max(chartMax, dailyMax). Si l'ATH n'a pas de barre coïncidente dans la TF
+//           courante, `athBarFound` = false et l'indicateur consommateur peut basculer en `extend.both`.
+// @returns Tuple [athValue, athBar, athBarFound]
+//          - athValue    : valeur du plus haut historique.
+//          - athBar      : index de la barre où l'ATH a été atteint dans la TF courante (peut être `na`).
+//          - athBarFound : `true` si l'ATH coïncide avec une barre de la TF courante.
+export ath() =>
+    chartMax = runningHigh()
+    dailyMax = request.security(syminfo.tickerid, "D", runningHigh()[1], lookahead = barmerge.lookahead_on)
+    athValue = math.max(chartMax, nz(dailyMax, chartMax))
+
+    var int  athBar      = na
+    var bool athBarFound = false
+    if not na(high) and high >= athValue
+        athBar      := bar_index
+        athBarFound := true
+    [athValue, athBar, athBarFound]
