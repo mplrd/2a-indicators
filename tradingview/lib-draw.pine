@@ -92,7 +92,7 @@ export resolveLevelStartAndExtend(series int startBar, series bool startBarFound
 // @param lineArr       Array des lignes pour gestion FIFO côté caller (push uniquement).
 // @param labelArr      Array des labels (push uniquement).
 // @returns series line — la ligne créée ou `na` si rien dessiné.
-export drawLevel(simple bool show, float price, int startBar, bool startBarFound, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, array<line> lineArr, array<label> labelArr) =>
+export drawLevel(series bool show, float price, int startBar, bool startBarFound, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, array<line> lineArr, array<label> labelArr) =>
     line ln = na
     if show and not na(price)
         [startX, extendMode] = resolveLevelStartAndExtend(startBar, startBarFound)
@@ -106,6 +106,39 @@ export drawLevel(simple bool show, float price, int startBar, bool startBarFound
             lb = label.new(
               x = bar_index + 20, y = price, text = lbl,
               xloc = xloc.bar_index, style = label.style_none,
+              textcolor = col, size = size.small)
+            array.push(labelArr, lb)
+    ln
+
+// @function Dessine un niveau horizontal à partir d'un TIMESTAMP de début (xloc.bar_time).
+//           Variante de `drawLevel` pour les sessions et autres niveaux dont l'origine est un
+//           timestamp précis (pas un bar_index). Toujours en `extend.right` (l'origine est connue
+//           par définition pour une session du jour).
+// @param show       Toggle global.
+// @param price      Prix du niveau.
+// @param startTime  Timestamp ms d'origine.
+// @param col        Couleur.
+// @param width      Épaisseur.
+// @param styleEnum  Style de ligne.
+// @param lbl        Texte du label (`""` = pas de label).
+// @param showLbl    Toggle global d'affichage des labels.
+// @param lineArr    Array des lignes (push).
+// @param labelArr   Array des labels (push).
+// @returns series line — la ligne créée ou `na`.
+export drawSessionLevel(series bool show, float price, int startTime, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, array<line> lineArr, array<label> labelArr) =>
+    line ln = na
+    if show and not na(price) and not na(startTime)
+        oneBarMs = timeframe.in_seconds() * 1000
+        ln := line.new(
+          x1 = startTime, y1 = price, x2 = time + oneBarMs * 5, y2 = price,
+          xloc = xloc.bar_time, extend = extend.right,
+          color = col, width = width,
+          style = styleEnum == LineStyle.DASHED ? line.style_dashed : styleEnum == LineStyle.DOTTED ? line.style_dotted : line.style_solid)
+        array.push(lineArr, ln)
+        if showLbl and lbl != ""
+            lb = label.new(
+              x = time + oneBarMs * 20, y = price, text = lbl,
+              xloc = xloc.bar_time, style = label.style_none,
               textcolor = col, size = size.small)
             array.push(labelArr, lb)
     ln

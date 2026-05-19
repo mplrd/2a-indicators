@@ -10,7 +10,7 @@
 
 | Lib | Couche | Version | Date | Dépendances | Notes |
 |-----|--------|---------|------|-------------|-------|
-| `lib-time` | 0 | _non publié_ | — | — | scaffold dispo |
+| `lib-time` | 0 | **`2`** | 2026-05-19 | — | publié (v2 retire le UDT Session, signatures `simple string sessionStr, simple string tz` directes — cf. memory pine_typing § 4) |
 | `lib-market` | 0 | _non publié_ | — | `lib-time` | scaffold stub (`detect()` retourne `NON_CASH`) |
 | `lib-zone` | 0 | _non publié_ | — | — | scaffold dispo |
 | `lib-series` | 0 | **`2`** | 2026-05-19 | — | publié (v2 ajoute `projectMean()`) |
@@ -21,8 +21,8 @@
 | `lib-cmi` | 1 | _non publié_ | — | `lib-zone`, `lib-series` | — |
 | `lib-fvg` | 1 | _non publié_ | — | `lib-zone` | — |
 | `lib-gap` | 1 | _non publié_ | — | `lib-time` | — |
-| `lib-levels` | 1 | **`1`** | 2026-05-19 | — | publié (v1 : `previousPeriodHL` D/W/M, `previousPeriodStartTime`, `previousPeriodStartBar`, `ath()` avec gestion ATH hors-fenêtre) |
-| `lib-draw` | 2 | **`5`** | 2026-05-19 | — | publié (v4 : `resolveLevelStartAndExtend()` règle 365 barres ; v5 : `drawLevel()` helper de rendu de niveau) |
+| `lib-levels` | 1 | **`2`** | 2026-05-19 | `lib-time` v2 | publié (v1 : `previousPeriodHL` D/W/M + `ath()` ; v2 : `sessionHL()` H/L journalier par session) |
+| `lib-draw` | 2 | **`7`** | 2026-05-19 | — | publié (v4 `resolveLevelStartAndExtend` ; v5 `drawLevel` ; v6 `drawSessionLevel` ; v7 params `show` passés en `series bool` — accepte les combinaisons avec series) |
 | `lib-zone-draw` | 2 | _non publié_ | — | `lib-zone`, `lib-draw` | — |
 
 ## Imports actifs (à copier-coller)
@@ -30,16 +30,17 @@
 Ce bloc reflète l'**état réel** publié — n'inclut PAS les libs `_non publié_`.
 
 ```pinescript
+import mpilard/lib_time/2       as tm
 import mpilard/lib_series/2     as series
 import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_levels/1     as levels
-import mpilard/lib_draw/5       as draw
+import mpilard/lib_levels/2     as levels
+import mpilard/lib_draw/7       as draw
 ```
 
-Les libs non publiées (`lib_time`, `lib_market`, `lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
+Les libs non publiées (`lib_market`, `lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
 
 ## Workflow de publication
 
@@ -56,7 +57,7 @@ Les alias courts à utiliser systématiquement dans les `import` :
 
 | Lib | Alias |
 |-----|-------|
-| `lib_time` | `time` |
+| `lib_time` | `tm` *(éviter `time` qui shadow le builtin Pine)* |
 | `lib_market` | `market` |
 | `lib_zone` | `zone` |
 | `lib_series` | `series` |

@@ -1,9 +1,10 @@
 //@version=6
-// @description lib-levels — extraction des niveaux de prix passés : PDH/PDL, PWH/PWL, PMH/PML, ATH.
-//              Couche 1, aucune dépendance lib (utilise uniquement `request.security` + builtins).
-//              Toutes les fonctions sont anti-repaint par construction (lookahead_on + `[1]` sur les
-//              valeurs sourcées du timeframe supérieur).
+// @description lib-levels — extraction des niveaux de prix passés : PDH/PDL, PWH/PWL, PMH/PML, ATH,
+//              + H/L de sessions (Asian/EU/US). Couche 1, dépend de lib_time pour les helpers de session.
+//              Toutes les fonctions sont anti-repaint par construction.
 library("lib_levels", overlay = true)
+
+import mpilard/lib_time/2 as tm
 
 // ============================================================
 // Niveaux de période précédente (Daily / Weekly / Monthly)
@@ -75,3 +76,41 @@ export ath() =>
         athBar      := bar_index
         athBarFound := true
     [athValue, athBar, athBarFound]
+
+// ============================================================
+// Sessions — High / Low du jour
+// ============================================================
+
+// @function H/L de la session pour le jour COURANT (dans la timezone de la session).
+//           Reset à chaque changement de jour. Pendant la session, MAJ en temps réel. Hors session,
+//           valeurs figées au dernier état observé. Le timestamp `sStartTime` est l'ouverture de la
+//           session aujourd'hui (`na` tant qu'aucune barre n'a été vue dans la session).
+// @param s Session (cf. lib_time.Session).
+// @returns [sH, sL, sStartTime, seenToday]
+//          - sH, sL       : high/low de la session aujourd'hui (`na` si pas encore commencée).
+//          - sStartTime   : timestamp ms de l'ouverture de la session aujourd'hui (`na` sinon).
+//          - seenToday    : true dès qu'une barre intra-session a été observée aujourd'hui.
+export sessionHL(simple string sessionStr, simple string tz) =>
+    var float sH        = na
+    var float sL        = na
+    var int   sStart    = na
+    var bool  seenToday = false
+    var int   currDay   = na
+
+    today = tm.dateInTz(tz)
+    if not na(currDay) and currDay != today
+        // Nouveau jour → reset
+        sH        := na
+        sL        := na
+        sStart    := na
+        seenToday := false
+    currDay := today
+
+    if tm.inSession(sessionStr, tz)
+        if not seenToday
+            sStart    := time
+            seenToday := true
+        sH := na(sH) ? high : math.max(sH, high)
+        sL := na(sL) ? low  : math.min(sL, low)
+
+    [sH, sL, sStart, seenToday]

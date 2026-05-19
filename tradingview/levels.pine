@@ -5,8 +5,8 @@ indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_cou
 // ============================================================
 // Imports
 // ============================================================
-import mpilard/lib_levels/1 as levels
-import mpilard/lib_draw/5   as draw
+import mpilard/lib_levels/2 as levels
+import mpilard/lib_draw/7   as draw
 
 // ============================================================
 // Inputs
@@ -36,14 +36,41 @@ monthlyColor   = input.color(#555555,               "",                  inline 
 monthlyStyle   = input.enum(draw.LineStyle.SOLID,   "",                  inline = "monthly_level", group = levelsGroup)
 monthlyWidth   = input.int(3,                       "",                  inline = "monthly_level", group = levelsGroup, minval = 1, maxval = 5)
 
+// --- Sessions (intraday uniquement) ---
+asianEnabled = input.bool(true,                      "Session Asiatique",  inline = "asian_session",  group = levelsGroup)
+asianColor   = input.color(color.orange,             "",                   inline = "asian_session",  group = levelsGroup)
+asianStyle   = input.enum(draw.LineStyle.SOLID,      "",                   inline = "asian_session",  group = levelsGroup)
+asianWidth   = input.int(1,                          "",                   inline = "asian_session",  group = levelsGroup, minval = 1, maxval = 5)
+
+euEnabled = input.bool(false,                        "Session Européenne", inline = "eu_session",     group = levelsGroup)
+euColor   = input.color(color.blue,                  "",                   inline = "eu_session",     group = levelsGroup)
+euStyle   = input.enum(draw.LineStyle.SOLID,         "",                   inline = "eu_session",     group = levelsGroup)
+euWidth   = input.int(1,                             "",                   inline = "eu_session",     group = levelsGroup, minval = 1, maxval = 5)
+
+usEnabled = input.bool(false,                        "Session Américaine", inline = "us_session",     group = levelsGroup)
+usColor   = input.color(color.purple,                "",                   inline = "us_session",     group = levelsGroup)
+usStyle   = input.enum(draw.LineStyle.SOLID,         "",                   inline = "us_session",     group = levelsGroup)
+usWidth   = input.int(1,                             "",                   inline = "us_session",     group = levelsGroup, minval = 1, maxval = 5)
+
+// --- Paramètres des Sessions ---
+var sessionParamsGroup = "Paramètres des Sessions"
+asianSessionStr = input.session("0800-1400",     "Asiatique",  inline = "asian_params", group = sessionParamsGroup)
+asianTz         = input.string("Asia/Tokyo",     "",           inline = "asian_params", group = sessionParamsGroup)
+euSessionStr    = input.session("0900-1400",     "Européenne", inline = "eu_params",    group = sessionParamsGroup)
+euTz            = input.string("Europe/Paris",   "",           inline = "eu_params",    group = sessionParamsGroup)
+usSessionStr    = input.session("0930-1600",     "Américaine", inline = "us_params",    group = sessionParamsGroup)
+usTz            = input.string("America/New_York","",          inline = "us_params",    group = sessionParamsGroup)
+
 // ============================================================
 // Filtres TF d'affichage
 // Règle : un niveau d'une période donnée s'affiche uniquement si la TF courante est <= à cette période.
+// Sessions : intraday uniquement (timeframe.isintraday).
 // ============================================================
 tfSec       = timeframe.in_seconds()
 showDaily   = tfSec <= timeframe.in_seconds("D")
 showWeekly  = tfSec <= timeframe.in_seconds("W")
 showMonthly = tfSec <= timeframe.in_seconds("M")
+showIntraday = timeframe.isintraday
 
 // ============================================================
 // Calculs des niveaux
@@ -57,6 +84,11 @@ pwStartBar = levels.previousPeriodStartBar("W")
 pmStartBar = levels.previousPeriodStartBar("M")
 
 [athValue, athBar, athBarFound] = levels.ath()
+
+// Sessions H/L (calculées en permanence — Pine les exige tick-by-tick).
+[asianH, asianL, asianStart, asianSeen] = levels.sessionHL(asianSessionStr, asianTz)
+[euH,    euL,    euStart,    euSeen]    = levels.sessionHL(euSessionStr,    euTz)
+[usH,    usL,    usStart,    usSeen]    = levels.sessionHL(usSessionStr,    usTz)
 
 // ============================================================
 // Rendu — refresh à chaque tick sur la dernière barre
@@ -88,3 +120,11 @@ if barstate.islast
     // PMH / PML
     draw.drawLevel(monthlyEnabled and showMonthly, pmH, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PMH", showLabels, lineArr, labelArr)
     draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, lineArr, labelArr)
+
+    // Sessions H/L (intraday uniquement)
+    draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianH, asianStart, asianColor, asianWidth, asianStyle, "Asian H", showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianL, asianStart, asianColor, asianWidth, asianStyle, "Asian L", showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(euEnabled    and showIntraday and euSeen,    euH,    euStart,    euColor,    euWidth,    euStyle,    "EU H",    showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(euEnabled    and showIntraday and euSeen,    euL,    euStart,    euColor,    euWidth,    euStyle,    "EU L",    showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usH,    usStart,    usColor,    usWidth,    usStyle,    "US H",    showLabels, lineArr, labelArr)
+    draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usL,    usStart,    usColor,    usWidth,    usStyle,    "US L",    showLabels, lineArr, labelArr)

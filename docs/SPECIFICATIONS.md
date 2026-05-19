@@ -196,11 +196,11 @@ Lignes horizontales dessinees sur `barstate.islast` uniquement. Chaque niveau a 
 
 Affichent le High/Low de la session en cours ou de la derniere session terminee. Uniquement visible en intraday.
 
-| Session | Horaires defaut | Timezone | Defaut on | Couleur |
-|---------|----------------|----------|-----------|---------|
-| Asiatique | 08:00-14:00 | Asia/Tokyo | oui | orange |
-| Europeenne | 09:00-14:00 | Europe/Paris | non | bleu |
-| Americaine | 09:30-16:00 | America/New_York | non | violet |
+| Session | Horaires defaut | Timezone | Defaut on | Couleur | Style | Epaisseur |
+|---------|----------------|----------|-----------|---------|-------|-----------|
+| Asiatique | 08:00-14:00 | Asia/Tokyo | oui | orange | solid | 1 |
+| Europeenne | 09:00-14:00 | Europe/Paris | non | bleu | solid | 1 |
+| Americaine | 09:30-16:00 | America/New_York | non | violet | solid | 1 |
 
 **Regles de session** :
 - Les High/Low sont reinitialises a chaque changement de jour.
