@@ -1,0 +1,22 @@
+//@version=6
+// @description lib-ma — moyennes mobiles et rubans. Couche 1.
+//              La détection de planéité/fermeture d'une série (slope%, isFlatSeries, isClosingSeries)
+//              vit dans lib-series : c'est une analyse générique de série, pas une primitive MA.
+library("lib_ma", overlay = true)
+
+import mpilard/lib_bollinger/1 as bb
+
+// ============================================================
+// Ruban autour d'une SMA
+// ============================================================
+
+// @function Ruban [basis - k*stdev , basis + k*stdev] autour d'une SMA.
+//           Implémenté en délégant à `bb.bands` avec le même multiplicateur inner et outer :
+//           un "ruban MA" est mathématiquement une bande de Bollinger à multiplicateur unique.
+// @param src       Série source (typiquement close).
+// @param length    Période SMA.
+// @param stdFactor Multiplicateur d'écart-type pour la demi-largeur du ruban. Défaut 0.236.
+// @returns Tuple [basis, upper, lower].
+export ribbon(series float src, simple int length, simple float stdFactor = 0.236) =>
+    [basis, upper, lower, _outerU, _outerL] = bb.bands(src, length, stdFactor, stdFactor)
+    [basis, upper, lower]

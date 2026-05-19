@@ -1,0 +1,39 @@
+//@version=6
+// @description lib-series — analytics génériques sur séries : pente, planéité, fermeture. Couche 0 (aucune dépendance, ne dessine rien).
+library("lib_series", overlay = true)
+
+// ============================================================
+// Pente
+// ============================================================
+
+// @function Pente d'une série exprimée en pourcentage entre la barre courante et celle d'il y a `length` barres.
+// @param src    Série source.
+// @param length Nombre de barres pour mesurer la variation (>0).
+// @returns Pente en %. `na` si l'une des valeurs est `na` ou si la valeur passée vaut 0.
+export slopePercent(series float src, simple int length) =>
+    past = src[length]
+    na(src) or na(past) or past == 0.0 ? na : (src - past) / past * 100.0
+
+// ============================================================
+// États d'une série
+// ============================================================
+
+// @function Vrai si la pente en valeur absolue est sous le seuil. Détection "série plate".
+// @param src       Série source.
+// @param length    Nombre de barres pour mesurer la pente.
+// @param threshold Seuil en pourcentage (ex : 0.015 = 0.015%).
+// @returns bool. `false` si la pente est `na`.
+export isFlatSeries(series float src, simple int length, simple float threshold) =>
+    s = slopePercent(src, length)
+    na(s) ? false : math.abs(s) < threshold
+
+// @function Vrai si la pente va dans le sens de la fermeture, ET la série n'est pas plate.
+// @param src       Série source.
+// @param length    Nombre de barres pour mesurer la pente.
+// @param threshold Seuil sous lequel la série est considérée plate (donc non "closing").
+// @param isUpper   true  → closing si la série descend (slope < 0).
+//                  false → closing si la série monte  (slope > 0).
+// @returns bool. Mutuellement exclusif avec `isFlatSeries` pour les mêmes paramètres.
+export isClosingSeries(series float src, simple int length, simple float threshold, simple bool isUpper) =>
+    s = slopePercent(src, length)
+    na(s) or math.abs(s) < threshold ? false : (isUpper ? s < 0.0 : s > 0.0)

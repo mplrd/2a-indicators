@@ -1,0 +1,29 @@
+//@version=6
+// @description lib-ichimoku — Système Ichimoku (Tenkan, Kijun, Chikou, Senkou A, Senkou B). Couche 1 (calculs purs, ne dessine rien).
+library("lib_ichimoku", overlay = true)
+
+// ============================================================
+// Helpers internes
+// ============================================================
+
+donchianMid(simple int len) =>
+    (ta.highest(high, len) + ta.lowest(low, len)) / 2.0
+
+// ============================================================
+// Composants
+// ============================================================
+
+// @function Calcule les 5 composants d'un Ichimoku standard. Aucun décalage temporel n'est appliqué ici :
+//           c'est à l'indicateur de plotter `senkouA`/`senkouB` avec `offset = +kijunLen` et
+//           `chikou` avec `offset = -kijunLen`.
+// @param tenkanLen Période Tenkan-Sen (défaut 9).
+// @param kijunLen  Période Kijun-Sen  (défaut 26).
+// @param senkouLen Période Senkou Span B (défaut 52).
+// @returns Tuple [tenkan, kijun, senkouA, senkouB, chikou].
+export components(simple int tenkanLen = 9, simple int kijunLen = 26, simple int senkouLen = 52) =>
+    tenkan  = donchianMid(tenkanLen)
+    kijun   = donchianMid(kijunLen)
+    senkouA = (tenkan + kijun) / 2.0
+    senkouB = donchianMid(senkouLen)
+    chikou  = close
+    [tenkan, kijun, senkouA, senkouB, chikou]

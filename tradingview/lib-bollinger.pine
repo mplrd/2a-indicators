@@ -1,0 +1,20 @@
+//@version=6
+// @description lib-bollinger — Bandes de Bollinger avec multiplicateurs interne et externe. Couche 1 (calculs purs, ne dessine rien).
+library("lib_bollinger", overlay = true)
+
+// ============================================================
+// Bandes
+// ============================================================
+
+// @function Calcule des bandes de Bollinger inner+outer à partir d'une SMA et d'un écart-type.
+//           Détection de l'état (plate / fermeture) volontairement hors scope : déléguée à lib-series
+//           (slopePercent / isFlatSeries / isClosingSeries) qui s'applique à n'importe quelle série.
+// @param src       Série source (typiquement close).
+// @param length    Période SMA.
+// @param multInner Multiplicateur d'écart-type pour la bande interne.
+// @param multOuter Multiplicateur d'écart-type pour la bande externe (≥ multInner).
+// @returns Tuple [basis, innerUpper, innerLower, outerUpper, outerLower].
+export bands(series float src, simple int length, simple float multInner, simple float multOuter) =>
+    basis = ta.sma(src, length)
+    dev   = ta.stdev(src, length)
+    [basis, basis + multInner * dev, basis - multInner * dev, basis + multOuter * dev, basis - multOuter * dev]
