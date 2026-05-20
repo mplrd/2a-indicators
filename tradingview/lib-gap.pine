@@ -1,0 +1,98 @@
+//@version=6
+// @description lib-gap — détection de gaps daily + cycle de vie (comblement partiel/total). Couche 1.
+//              Pas de dessin (le consommateur gère la collection et le rendu).
+library("lib_gap", overlay = true)
+
+// ============================================================
+// Types
+// ============================================================
+
+// @enum GapDirection — sens du gap.
+export enum GapDirection
+    BULLISH
+    BEARISH
+
+// @type Gap — gap daily avec état de comblement.
+//        - startTime  : ms du début du jour chart où le gap a été détecté
+//        - topPrice   : bord supérieur (descend en partial fill bull)
+//        - bottomPrice: bord inférieur (monte en partial fill bear)
+//        - direction  : BULLISH ou BEARISH
+//        - filled     : true quand totalement comblé (le consommateur peut filtrer au rendu)
+export type Gap
+    int          startTime
+    float        topPrice
+    float        bottomPrice
+    GapDirection direction
+    bool         filled
+
+// ============================================================
+// Détection
+// ============================================================
+
+// @function Détecte un gap daily à la N-ième barre après le day-change chart. La fenêtre d'attente
+//           laisse le marché se stabiliser pour éviter les faux gaps cash structurels (sur les
+//           instruments cash, la 1re barre du jour est toujours décalée vs cloture veille — ce n'est
+//           pas un "vrai" gap de prix).
+//
+//           Comparaison à la N-ième barre :
+//           - Bull : running low (cumulé sur N barres) > prevDailyClose → zone [prevClose, runningLow]
+//           - Bear : running high (cumulé sur N barres) < prevDailyClose → zone [runningHigh, prevClose]
+//
+//           État interne réinitialisé à chaque day-change. Une détection max par journée chart.
+// @param chartTz        TZ d'affichage du chart (déclenche le day-change).
+// @param prevDailyClose Close daily de la veille (à fournir via
+//                       `request.security(sym, "D", close[1], lookahead = barmerge.lookahead_on)`).
+// @param barsToWait     Nb de barres à attendre après le day-change avant d'évaluer (3 = spec).
+// @returns Gap si détecté à la N-ième barre, sinon na.
+export detect(simple string chartTz, float prevDailyClose, simple int barsToWait) =>
+    var int   barCount      = 0
+    var float runningLow    = na
+    var float runningHigh   = na
+    var int   dayStart      = na
+    var bool  detectedToday = false
+
+    isNewDay = ta.change(dayofmonth(time, chartTz)) != 0
+    if isNewDay
+        barCount      := 0
+        runningLow    := low
+        runningHigh   := high
+        dayStart      := time
+        detectedToday := false
+    else if not na(runningLow)
+        barCount    := barCount + 1
+        runningLow  := math.min(runningLow, low)
+        runningHigh := math.max(runningHigh, high)
+
+    Gap g = na
+    if not detectedToday and barCount == barsToWait and not na(prevDailyClose)
+        if runningLow > prevDailyClose
+            g := Gap.new(dayStart, runningLow, prevDailyClose, GapDirection.BULLISH, false)
+            detectedToday := true
+        else if runningHigh < prevDailyClose
+            g := Gap.new(dayStart, prevDailyClose, runningHigh, GapDirection.BEARISH, false)
+            detectedToday := true
+
+    g
+
+// ============================================================
+// Cycle de vie
+// ============================================================
+
+// @function Met à jour le cycle de vie d'un gap avec le bar courant (mutation in-place).
+//           - Partial fill : le prix entre dans la zone sans la traverser → rétrécit
+//             (top descend pour un bull gap, bottom monte pour un bear gap).
+//           - Total fill   : le prix traverse entièrement → `filled = true`.
+//           No-op si `g` est déjà filled.
+// @param g Gap à mettre à jour.
+export update(Gap g) =>
+    if not g.filled
+        if g.direction == GapDirection.BULLISH
+            if low <= g.bottomPrice
+                g.filled := true
+            else if low < g.topPrice
+                g.topPrice := low
+        else
+            if high >= g.topPrice
+                g.filled := true
+            else if high > g.bottomPrice
+                g.bottomPrice := high

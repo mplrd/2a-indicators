@@ -1,19 +1,13 @@
 //@version=6
-// @description lib-market — détection automatique du type d'instrument (cashEU / cashUS / cashAsia / nonCash). Couche 0.
-//              Dépend de lib-time pour les helpers de session.
-//
-//              STATUT v1 : enum exposée, `detect()` est un STUB qui retourne toujours NON_CASH.
-//              La logique complète (comparaison de la 1re bougie quotidienne aux sessions standards EU/US/Asia)
-//              sera développée en même temps que l'indicateur 2Ai Levels qui en est le premier consommateur.
+// @description lib-market — détection automatique du type d'instrument (cash EU/US/Asia ou non-cash). Couche 0.
+//              Aucune dépendance lib. La détection est sticky (calculée une fois, persiste).
 library("lib_market", overlay = true)
-
-// import <publisher>/lib_time/<n> as time
 
 // ============================================================
 // Types
 // ============================================================
 
-// @enum MarketType — Classification d'un instrument selon l'horaire de sa première bougie quotidienne.
+// @enum MarketType — Classification d'un instrument.
 export enum MarketType
     CASH_EU
     CASH_US
@@ -24,18 +18,47 @@ export enum MarketType
 // Détection
 // ============================================================
 
-// @function Détecte le type de marché.
+// @function Détecte le type de marché en se basant sur `syminfo.type` + `syminfo.timezone` —
+//           valeurs FIXES par instrument, données par TradingView. Beaucoup plus fiable qu'un
+//           algorithme basé sur les bougies (qui dépend de TF/alignement/extended hours).
 //
-//           ALGORITHME CIBLE (à implémenter avec Levels) :
-//             1. Identifier la première bougie de la journée courante (timezone de l'instrument).
-//             2. Convertir son timestamp dans chaque timezone candidate (Europe/Paris, America/New_York, Asia/Tokyo).
-//             3. Si l'heure tombe dans la session EU standard (~09:00 Paris) → CASH_EU.
-//                Si dans la session US standard (~09:30 NY)                  → CASH_US.
-//                Si dans la session Asia standard (~08:00 Tokyo)             → CASH_ASIA.
-//                Sinon (instrument H24)                                      → NON_CASH.
-//             4. Mettre le résultat en cache via `var` car la classification est stable sur la durée du chart.
+//           Logique :
+//           - `syminfo.type` ∈ {"crypto", "forex"}                   → NON_CASH (continu 24h, pas de cash session)
+//           - sinon `syminfo.timezone` commence par "America/"       → CASH_US
+//           - sinon `syminfo.timezone` commence par "Europe/"        → CASH_EU
+//           - sinon `syminfo.timezone` commence par "Asia/" ou "Australia/" → CASH_ASIA
+//           - sinon                                                  → NON_CASH (fallback)
 //
-// @returns MarketType (toujours NON_CASH dans la v1 stub).
+//           Cas particuliers :
+//           - Futures NYMEX/CBOT/CME (syminfo.timezone = America/New_York ou America/Chicago) →
+//             classés CASH_US. C'est intentionnel : l'OPR à 9h30 NY est l'événement de référence
+//             pour les futures sur indices US.
+//           - Indices européens (DAX, CAC, FTSE) → CASH_EU via TZ Europe/*.
+//
+// @returns MarketType (sticky)
 export detect() =>
-    // TODO Implémenter la détection complète quand Levels arrive.
-    MarketType.NON_CASH
+    var MarketType marketType = MarketType.NON_CASH
+    var bool detected = false
+
+    if not detected
+        symType = syminfo.type
+        tz      = syminfo.timezone
+
+        if symType == "crypto" or symType == "forex"
+            marketType := MarketType.NON_CASH
+        else if str.startswith(tz, "America/")
+            marketType := MarketType.CASH_US
+        else if str.startswith(tz, "Europe/")
+            marketType := MarketType.CASH_EU
+        else if str.startswith(tz, "Asia/") or str.startswith(tz, "Australia/")
+            marketType := MarketType.CASH_ASIA
+        else
+            marketType := MarketType.NON_CASH
+
+        detected := true
+
+    marketType
+
+// @function Vrai si le type détecté correspond à un marché cash (EU, US ou Asia).
+export isCash(MarketType mt) =>
+    mt == MarketType.CASH_EU or mt == MarketType.CASH_US or mt == MarketType.CASH_ASIA

@@ -183,10 +183,10 @@ Lignes horizontales dessinees sur `barstate.islast` uniquement. Chaque niveau a 
 
 | Niveau | Label | Defaut on | Couleur | Style | Epaisseur | Condition d'affichage |
 |--------|-------|-----------|---------|-------|-----------|-----------------------|
-| PDH / PDL | Previous Day High/Low | oui | navy | solid | 1 | TF <= Daily |
-| PWH / PWL | Previous Week High/Low | oui | navy | solid | 2 | TF <= Weekly |
-| PMH / PML | Previous Month High/Low | oui | navy | solid | 3 | TF <= Monthly |
-| ATH | All-Time High | oui | rouge | dashed | 2 | toujours |
+| PDH / PDL | Previous Day High/Low | oui | gris foncé (#555555) | solid | 1 | TF <= Daily |
+| PWH / PWL | Previous Week High/Low | oui | gris foncé (#555555) | solid | 2 | TF <= Weekly |
+| PMH / PML | Previous Month High/Low | oui | gris foncé (#555555) | solid | 3 | TF <= Monthly |
+| ATH | All-Time High | oui | rouge foncé (#8B0000) | dashed | 2 | toujours |
 
 **Regle de timeframe** : chaque niveau de periode n'est affiche que si le timeframe du graphique est inferieur ou egal a la periode du niveau. Ex : PDH/PDL n'apparait pas sur un graphique weekly.
 
@@ -196,11 +196,11 @@ Lignes horizontales dessinees sur `barstate.islast` uniquement. Chaque niveau a 
 
 Affichent le High/Low de la session en cours ou de la derniere session terminee. Uniquement visible en intraday.
 
-| Session | Horaires defaut | Timezone | Defaut on | Couleur |
-|---------|----------------|----------|-----------|---------|
-| Asiatique | 08:00-14:00 | Asia/Tokyo | oui | orange |
-| Europeenne | 09:00-14:00 | Europe/Paris | non | bleu |
-| Americaine | 09:30-16:00 | America/New_York | non | violet |
+| Session | Horaires defaut | Timezone | Defaut on | Couleur | Style | Epaisseur |
+|---------|----------------|----------|-----------|---------|-------|-----------|
+| Asiatique | 08:00-14:00 | Asia/Tokyo | oui | orange | solid | 1 |
+| Europeenne | 09:00-14:00 | Europe/Paris | non | bleu | solid | 1 |
+| Americaine | 09:30-16:00 | America/New_York | non | violet | solid | 1 |
 
 **Regles de session** :
 - Les High/Low sont reinitialises a chaque changement de jour.
