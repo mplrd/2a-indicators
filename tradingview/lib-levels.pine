@@ -81,54 +81,73 @@ export ath() =>
 // Sessions — High / Low du jour
 // ============================================================
 
-// @function H/L de la session pour le jour COURANT (dans la timezone de la session).
-//           Reset à chaque changement de jour. Pendant la session, MAJ en temps réel. Hors session,
-//           valeurs figées au dernier état observé. Le timestamp `sStartTime` est l'ouverture de la
-//           session aujourd'hui (`na` tant qu'aucune barre n'a été vue dans la session).
-// @param s Session (cf. lib_time.Session).
-// @returns [sH, sL, sStartTime, seenToday]
-//          - sH, sL       : high/low de la session aujourd'hui (`na` si pas encore commencée).
-//          - sStartTime   : timestamp ms de l'ouverture de la session aujourd'hui (`na` sinon).
-//          - seenToday    : true dès qu'une barre intra-session a été observée aujourd'hui.
-export sessionHL(simple string sessionStr, simple string tz) =>
+// @function H/L de la session courante. Réinitialise tout à chaque changement de date dans
+//           `chartTz` (= TZ d'affichage du chart). Pendant la session, MAJ en temps réel.
+//           Une fois la session terminée, la ligne reste figée jusqu'au prochain changement
+//           de date chart, puis disparaît (pas de "session de la veille" visible le lendemain).
+// @param sessionStr Plage horaire "HHMM-HHMM".
+// @param sessionTz  Timezone IANA dans laquelle la session est définie (ex : "Asia/Tokyo").
+// @param chartTz    Timezone IANA d'affichage du chart, contrôle la lifetime de la session
+//                   (ex : "Europe/Paris" → reset à 00h Paris).
+// @returns [sH, sL, sStartTime, sEndTime, seenToday, inSession]
+export sessionHL(simple string sessionStr, simple string sessionTz, simple string chartTz) =>
     var float sH           = na
     var float sL           = na
     var int   sStart       = na
+    var int   sEnd         = na
     var bool  seenToday    = false
     var bool  wasInSession = false
 
-    inS = tm.inSession(sessionStr, tz)
+    // Reset à chaque changement de date chart → pas de session de la veille.
+    if ta.change(dayofmonth(time, chartTz)) != 0
+        sH := na
+        sL := na
+        sStart := na
+        sEnd := na
+        seenToday := false
+        wasInSession := false
+
+    inS = tm.inSession(sessionStr, sessionTz)
     if inS and not wasInSession
-        sStart    := time
-        sH        := high
-        sL        := low
+        sStart := time
+        // Parse "HHMM-HHMM" → on connait la fin de session, on borne sEnd dès le début.
+        // Pas de support cross-midnight pour l'instant (Asian/EU/US/Future ne traversent pas).
+        endHH = math.round(nz(str.tonumber(str.substring(sessionStr, 5, 7)), 0))
+        endMM = math.round(nz(str.tonumber(str.substring(sessionStr, 7, 9)), 0))
+        sEnd  := timestamp(sessionTz, year(time, sessionTz), month(time, sessionTz), dayofmonth(time, sessionTz), endHH, endMM)
+        sH := high
+        sL := low
         seenToday := true
     else if inS
         sH := math.max(sH, high)
         sL := math.min(sL, low)
     wasInSession := inS
 
-    [sH, sL, sStart, seenToday]
+    [sH, sL, sStart, sEnd, seenToday, inS]
 
 // ============================================================
 // Opens — prix d'ouverture de session
 // ============================================================
 
-// @function Prix d'ouverture de la session pour le jour courant (premier `open` observé pendant la session).
-//           Reset à chaque changement de jour (dans la TZ de la session).
+// @function Prix d'ouverture de la session pour la journée chart courante. Reset à chaque
+//           changement de date dans `chartTz` (cohérent avec `sessionHL`).
 // @param sessionStr "HHMM-HHMM"
-// @param tz         Timezone IANA.
+// @param sessionTz  Timezone IANA dans laquelle la session est définie.
+// @param chartTz    Timezone IANA d'affichage du chart (lifetime).
 // @returns [openPrice, openTime, seenToday]
-//          - openPrice : `open` de la 1re barre intra-session.
-//          - openTime  : timestamp ms de cette 1re barre.
-//          - seenToday : true dès observation d'une barre intra-session aujourd'hui.
-export sessionOpen(simple string sessionStr, simple string tz) =>
+export sessionOpen(simple string sessionStr, simple string sessionTz, simple string chartTz) =>
     var float oPrice       = na
     var int   oTime        = na
     var bool  seenToday    = false
     var bool  wasInSession = false
 
-    inS = tm.inSession(sessionStr, tz)
+    if ta.change(dayofmonth(time, chartTz)) != 0
+        oPrice := na
+        oTime := na
+        seenToday := false
+        wasInSession := false
+
+    inS = tm.inSession(sessionStr, sessionTz)
     if inS and not wasInSession
         oPrice    := open
         oTime     := time
@@ -138,45 +157,34 @@ export sessionOpen(simple string sessionStr, simple string tz) =>
     [oPrice, oTime, seenToday]
 
 // ============================================================
-// Initial Balance Range (IBR) — H/L de la première heure de session
+// Open Range — H/L de la première heure horaire du jour
 // ============================================================
 
-// @function H/L de la PREMIÈRE HEURE de la session (Initial Balance Range).
-//           Tracké pendant 60 minutes à partir de l'ouverture de la session, puis figé.
-//           Reset à chaque changement de jour.
-// @param sessionStr "HHMM-HHMM"
-// @param tz         Timezone IANA.
-// @returns [ibH, ibL, ibStartTime, seenToday]
-//          - ibH, ibL   : high/low cumulés pendant la 1re heure de session.
-//          - ibStartTime: timestamp d'ouverture de la session aujourd'hui.
-//          - seenToday  : true dès observation d'une barre intra-session aujourd'hui.
-// @function H/L de la PREMIÈRE BOUGIE HORAIRE DU JOUR (par rapport au chart, pas à une TZ fixée).
-//           Utilise `session.isfirstbar_regular` — builtin Pine qui détecte la 1re barre de la session
-//           régulière du symbole, telle que TV la définit pour le chart courant. Aucune timezone à
-//           supposer côté code : Pine sait ce qui est le "1er bar du jour" pour cet instrument.
+// @function H/L des 60 PREMIÈRES MINUTES de la journée (Open Range).
+//           La "1re bougie du jour" = bougie où la date change vs la précédente, **dans la TZ
+//           passée en argument**. Pine v6 n'expose AUCUN moyen d'accéder à la TZ d'affichage du
+//           chart. `syminfo.timezone` est la TZ de l'exchange (UTC pour crypto, NY pour CFD US,
+//           etc.) — différente de ce que l'utilisateur voit visuellement sur le chart. Donc on
+//           exige une TZ explicite : le consommateur décide.
 //
-//           Tracke H/L pendant 60 minutes à partir de cette barre.
-//
-//           Calcul sur TF courante. Pour exactitude indépendante du TF du chart (ex : alignement xxh30
-//           sur FXCM, 9h30 NY sur cash US), wrapper côté indicateur :
-//           `request.security(syminfo.tickerid, "1", levels.firstH1OfDay())`.
-// @returns [ibH, ibL, ibStartTime, seenToday]
-export firstH1OfDay() =>
-    var float ibH       = na
-    var float ibL       = na
-    var int   ibStart   = na
-    var int   ibEnd     = na
+//           Tracke H/L jusqu'à `start + 60min`, puis fige. À utiliser sur les TF < H1 (M1 à M30).
+// @param tz Timezone IANA (ex : "Europe/Paris") = TZ relative à laquelle "minuit" est défini.
+// @returns [orH, orL, orStartTime, orEndTime, seenToday]
+export openRange(simple string tz) =>
+    var float orH       = na
+    var float orL       = na
+    var int   orStart   = na
+    var int   orEnd     = na
     var bool  seenToday = false
 
-    if session.isfirstbar_regular
-        // 1re barre de la session régulière du jour → init IBR
-        ibStart   := time
-        ibEnd     := time + 3600000  // +60 minutes en ms
-        ibH       := high
-        ibL       := low
+    if ta.change(dayofmonth(time, tz)) != 0
+        orStart   := time
+        orEnd     := time + 3600000
+        orH       := high
+        orL       := low
         seenToday := true
-    else if seenToday and not na(ibEnd) and time < ibEnd
-        ibH := math.max(ibH, high)
-        ibL := math.min(ibL, low)
+    else if seenToday and not na(orEnd) and time < orEnd
+        orH := math.max(orH, high)
+        orL := math.min(orL, low)
 
-    [ibH, ibL, ibStart, seenToday]
+    [orH, orL, orStart, orEnd, seenToday]

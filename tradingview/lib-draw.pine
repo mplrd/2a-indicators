@@ -92,7 +92,7 @@ export resolveLevelStartAndExtend(series int startBar, series bool startBarFound
 // @param lineArr       Array des lignes pour gestion FIFO côté caller (push uniquement).
 // @param labelArr      Array des labels (push uniquement).
 // @returns series line — la ligne créée ou `na` si rien dessiné.
-export drawLevel(series bool show, float price, int startBar, bool startBarFound, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, array<line> lineArr, array<label> labelArr) =>
+export drawLevel(series bool show, float price, int startBar, bool startBarFound, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, simple bool isHigh, array<line> lineArr, array<label> labelArr) =>
     line ln = na
     if show and not na(price)
         [startX, extendMode] = resolveLevelStartAndExtend(startBar, startBarFound)
@@ -104,21 +104,28 @@ export drawLevel(series bool show, float price, int startBar, bool startBarFound
           force_overlay = true)
         array.push(lineArr, ln)
         if showLbl and lbl != ""
+            // isHigh = body au-dessus de la ligne (style_label_down), !isHigh = en-dessous (style_label_up).
+            // Body coloré à la couleur du niveau, texte blanc.
             lb = label.new(
               x = bar_index + 20, y = price, text = lbl,
-              xloc = xloc.bar_index, style = label.style_none,
-              textcolor = col, size = size.small,
+              xloc = xloc.bar_index,
+              style = isHigh ? label.style_label_down : label.style_label_up,
+              color = col, textcolor = color.white, size = size.small,
               force_overlay = true)
             array.push(labelArr, lb)
     ln
 
-// @function Dessine un niveau horizontal à partir d'un TIMESTAMP de début (xloc.bar_time).
-//           Variante de `drawLevel` pour les sessions et autres niveaux dont l'origine est un
-//           timestamp précis (pas un bar_index). Toujours en `extend.right` (l'origine est connue
-//           par définition pour une session du jour).
+// @function Dessine un niveau horizontal borné dans le temps (sessions, open range, opens).
+//           - Si `ongoing = true` : la ligne s'étend à droite (session en cours). Le label est
+//             placé à `bar_index + 20` en `xloc.bar_index` (aligné avec `drawLevel`).
+//           - Si `ongoing = false` : la ligne s'arrête à `endTime` (session terminée / range figé).
+//             Le label est placé à `endTime` en `xloc.bar_time` (étiquette en bout de ligne).
+//             Si `endTime` est `na`, rien n'est dessiné.
 // @param show       Toggle global.
 // @param price      Prix du niveau.
 // @param startTime  Timestamp ms d'origine.
+// @param endTime    Timestamp ms de fin (utilisé seulement si `ongoing = false`).
+// @param ongoing    `true` = session en cours (extend.right), `false` = bornée à endTime.
 // @param col        Couleur.
 // @param width      Épaisseur.
 // @param styleEnum  Style de ligne.
@@ -127,22 +134,34 @@ export drawLevel(series bool show, float price, int startBar, bool startBarFound
 // @param lineArr    Array des lignes (push).
 // @param labelArr   Array des labels (push).
 // @returns series line — la ligne créée ou `na`.
-export drawSessionLevel(series bool show, float price, int startTime, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, array<line> lineArr, array<label> labelArr) =>
+export drawSessionLevel(series bool show, float price, int startTime, int endTime, series bool ongoing, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, simple bool isHigh, array<line> lineArr, array<label> labelArr) =>
     line ln = na
-    if show and not na(price) and not na(startTime)
+    drawable = show and not na(price) and not na(startTime) and (ongoing or not na(endTime))
+    if drawable
         oneBarMs = timeframe.in_seconds() * 1000
+        x2_val   = ongoing ? time + oneBarMs * 5 : endTime
+        ext      = ongoing ? extend.right : extend.none
         ln := line.new(
-          x1 = startTime, y1 = price, x2 = time + oneBarMs * 5, y2 = price,
-          xloc = xloc.bar_time, extend = extend.right,
+          x1 = startTime, y1 = price, x2 = x2_val, y2 = price,
+          xloc = xloc.bar_time, extend = ext,
           color = col, width = width,
           style = styleEnum == LineStyle.DASHED ? line.style_dashed : styleEnum == LineStyle.DOTTED ? line.style_dotted : line.style_solid,
           force_overlay = true)
         array.push(lineArr, ln)
         if showLbl and lbl != ""
-            lb = label.new(
-              x = time + oneBarMs * 20, y = price, text = lbl,
-              xloc = xloc.bar_time, style = label.style_none,
-              textcolor = col, size = size.small,
-              force_overlay = true)
-            array.push(labelArr, lb)
+            labelStyle = isHigh ? label.style_label_down : label.style_label_up
+            if ongoing
+                lb = label.new(
+                  x = bar_index + 20, y = price, text = lbl,
+                  xloc = xloc.bar_index, style = labelStyle,
+                  color = col, textcolor = color.white, size = size.small,
+                  force_overlay = true)
+                array.push(labelArr, lb)
+            else
+                lb = label.new(
+                  x = endTime, y = price, text = lbl,
+                  xloc = xloc.bar_time, style = labelStyle,
+                  color = col, textcolor = color.white, size = size.small,
+                  force_overlay = true)
+                array.push(labelArr, lb)
     ln

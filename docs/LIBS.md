@@ -21,8 +21,8 @@
 | `lib-cmi` | 1 | _non publié_ | — | `lib-zone`, `lib-series` | — |
 | `lib-fvg` | 1 | _non publié_ | — | `lib-zone` | — |
 | `lib-gap` | 1 | _non publié_ | — | `lib-time` | — |
-| `lib-levels` | 1 | **`8`** | 2026-05-19 | `lib-time` v2 | publié (v1 `previousPeriodHL` + `ath()` ; v2 `sessionHL()` ; v3 `sessionOpen()` + `sessionIBR()` ; v4-v7 itérations IBR ; v8 `firstH1OfDay()` + `sessionHL/Open` `wasInSession = false` init simple, fix non-affichage Asian) |
-| `lib-draw` | 2 | **`8`** | 2026-05-19 | — | publié (v4 `resolveLevelStartAndExtend` ; v5 `drawLevel` ; v6 `drawSessionLevel` ; v7 params `show` en `series bool` ; v8 `force_overlay = true` sur line.new/label.new pour figer en bar_index space) |
+| `lib-levels` | 1 | **`12`** | 2026-05-20 | `lib-time` v2 | publié (v1 `previousPeriodHL` + `ath()` ; v2 `sessionHL()` ; v3 `sessionOpen()` + `sessionIBR()` ; v4-v7 itérations IBR ; v8 `firstH1OfDay()` ; v9-v10 itérations OR + TZ ; v11 `sessionHL/Open` reset à minuit chart (param `chartTz`), `openRange(tz)` ; v12 `sessionHL` parse `sessionStr` pour borner sEnd dès début de session) |
+| `lib-draw` | 2 | **`11`** | 2026-05-20 | — | publié (v4 `resolveLevelStartAndExtend` ; v5 `drawLevel` ; v6 `drawSessionLevel` ; v7 params `show` en `series bool` ; v8 `force_overlay` ; v9-v10 `drawSessionLevel` : params `endTime` + `ongoing`, label adaptatif ; v11 `drawLevel`/`drawSessionLevel` param `isHigh` + labels colorés `style_label_down/up` (body au-dessus pour H, en-dessous pour L, body en couleur du niveau, texte blanc)) |
 | `lib-zone-draw` | 2 | _non publié_ | — | `lib-zone`, `lib-draw` | — |
 
 ## Imports actifs (à copier-coller)
@@ -37,8 +37,8 @@ import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_levels/8     as levels
-import mpilard/lib_draw/8       as draw
+import mpilard/lib_levels/12    as levels
+import mpilard/lib_draw/11      as draw
 ```
 
 Les libs non publiées (`lib_zone`, `lib_cmi`, `lib_fvg`, `lib_gap`, `lib_zone_draw`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
