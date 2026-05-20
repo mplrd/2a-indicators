@@ -1,0 +1,140 @@
+//@version=6
+// @description 2Ai Zones — Indicateur des zones d'intérêt sur l'UT courante.
+//              Phase 1 : Supply/Demand via CMI.
+//              Phase 2 : Fair Value Gaps (FVG) avec partial/total fill.
+//              Phases suivantes (à venir) : Zones 5★, Safe mode.
+//              Cf. SPECIFICATIONS.md § Indicateur 4.
+indicator("2Ai Zones", shorttitle = "2Ai Zones", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_signal/2 as signal
+import mpilard/lib_zone/1   as zone
+import mpilard/lib_fvg/2    as fvg
+import mpilard/lib_draw/14  as draw
+
+// ============================================================
+// Inputs
+// ============================================================
+
+var sdGroup  = "Supply / Demand"
+var fvgGroup = "Fair Value Gaps"
+
+// --- Supply / Demand ---
+sdEnabled     = input.bool(true,                   "Supply/Demand", group = sdGroup)
+sdBullColor   = input.color(color.blue,            "Demand (bull)", inline = "sd_colors", group = sdGroup)
+sdBearColor   = input.color(color.orange,          "Supply (bear)", inline = "sd_colors", group = sdGroup)
+sdBorderStyle = input.enum(draw.LineStyle.SOLID,   "Bordure",       inline = "sd_border", group = sdGroup)
+sdBorderWidth = input.int(1,                       "Épaisseur",     inline = "sd_border", group = sdGroup, minval = 0, maxval = 4)
+
+// --- Fair Value Gaps ---
+fvgEnabled     = input.bool(true,                   "FVG",      group = fvgGroup)
+fvgBullColor   = input.color(color.green,           "Bullish",  inline = "fvg_colors", group = fvgGroup)
+fvgBearColor   = input.color(color.red,             "Bearish",  inline = "fvg_colors", group = fvgGroup)
+fvgBorderStyle = input.enum(draw.LineStyle.DASHED,  "Bordure",  inline = "fvg_border", group = fvgGroup)
+fvgBorderWidth = input.int(0,                       "Épaisseur",inline = "fvg_border", group = fvgGroup, minval = 0, maxval = 4)
+
+// ============================================================
+// Calculs
+// ============================================================
+tfMinutes = math.round(timeframe.in_seconds() / 60)
+
+// CMI sur la barre courante (pas de validation 3 bougies en mode current TF).
+cmiSignal = signal.detectCMI()
+
+// Collection de zones S/D persistante.
+var array<zone.Zone> sdZones = array.new<zone.Zone>()
+
+// Lifecycle AVANT création : une nouvelle zone ne sera pas évaluée contre la barre où
+// elle vient d'être créée. Important car la CMI bar peut piercer en-dessous du bottom
+// de n-1 (cas où low_N < low_N-1) — auquel cas on ne veut pas que la zone meure
+// instantanément à sa propre naissance.
+// Comblement total :
+// - bull (demand) : low ≤ bottom → le prix a traversé la zone vers le bas
+// - bear (supply) : high ≥ top    → le prix a traversé la zone vers le haut
+if array.size(sdZones) > 0
+    for i = 0 to array.size(sdZones) - 1
+        z = array.get(sdZones, i)
+        if zone.isActive(z)
+            if z.side == zone.ZoneSide.BULL and low <= z.bottom
+                zone.expire(z)
+            else if z.side == zone.ZoneSide.BEAR and high >= z.top
+                zone.expire(z)
+
+// Création d'une zone S/D dès qu'une CMI est détectée. Règles :
+// - Anti-chaînage : une CMI qui tombe sur la barre IMMÉDIATEMENT après une CMI qui a déjà
+//   créé une zone est ignorée (continuation du même mouvement, pas une nouvelle zone).
+// - Anti-chevauchement par remplacement : si le candidat chevauche en prix une zone active
+//   de même side déjà présente, l'ancienne est expirée (S/D = court terme).
+// Spec : la zone S/D = bougie n-1 dans son intégralité (mèches incluses).
+var bool hadCmiPrev = false
+cmiNow = cmiSignal == signal.SignalKind.CMI_BULL or cmiSignal == signal.SignalKind.CMI_BEAR
+
+if sdEnabled and cmiNow and (not hadCmiPrev)
+    side = cmiSignal == signal.SignalKind.CMI_BULL ? zone.ZoneSide.BULL : zone.ZoneSide.BEAR
+    newZ = zone.newZone(high[1], low[1], time[1], side, tfMinutes)
+    if array.size(sdZones) > 0
+        for i = 0 to array.size(sdZones) - 1
+            existing = array.get(sdZones, i)
+            if zone.isActive(existing) and existing.side == side and zone.overlap(existing, newZ)
+                zone.expire(existing)
+    array.push(sdZones, newZ)
+
+hadCmiPrev := cmiNow
+
+// Cap mémoire FIFO hardcodé (cohérent avec max_boxes_count=500 par défaut Pine).
+MAX_ZONES = 100
+
+// Cleanup S/D : retire les expirées + FIFO.
+zone.removeExpired(sdZones)
+zone.trimOldest(sdZones, MAX_ZONES)
+
+// --- FVG ---
+// Collection de FVG persistante.
+var array<zone.Zone> fvgZones = array.new<zone.Zone>()
+
+// Détection FVG (3-bar pattern, filtre anti-faux-gap basé sur les transitions temporelles).
+if fvgEnabled
+    newFvg = fvg.detect(tfMinutes)
+    if not na(newFvg)
+        array.push(fvgZones, newFvg)
+
+// Lifecycle FVG : partial fill (shrink) + total fill (expire).
+if array.size(fvgZones) > 0
+    for i = 0 to array.size(fvgZones) - 1
+        fvg.update(array.get(fvgZones, i))
+
+// Cleanup FVG.
+zone.removeExpired(fvgZones)
+zone.trimOldest(fvgZones, MAX_ZONES)
+
+// ============================================================
+// Rendu — refresh à chaque tick sur la dernière barre
+// ============================================================
+var array<box>   boxArr   = array.new<box>()
+var array<label> labelArr = array.new<label>()
+
+if barstate.islast
+    // Nettoyage des objets précédents
+    for bx in boxArr
+        box.delete(bx)
+    array.clear(boxArr)
+    for lb in labelArr
+        label.delete(lb)
+    array.clear(labelArr)
+
+    // Rendu des zones S/D actives (transparence 85% fond / 40% bordure cf. spec).
+    // CMI bull → Demand (support potentiel) ; CMI bear → Supply (résistance potentielle).
+    if sdEnabled
+        for z in sdZones
+            isBull = z.side == zone.ZoneSide.BULL
+            col = isBull ? sdBullColor : sdBearColor
+            draw.drawZone(true, z, col, sdBorderWidth, sdBorderStyle, 85, 40, false, "", boxArr, labelArr)
+
+    // Rendu des FVG actifs.
+    if fvgEnabled
+        for z in fvgZones
+            isBull = z.side == zone.ZoneSide.BULL
+            col = isBull ? fvgBullColor : fvgBearColor
+            draw.drawZone(true, z, col, fvgBorderWidth, fvgBorderStyle, 85, 40, false, "", boxArr, labelArr)

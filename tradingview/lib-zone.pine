@@ -1,26 +1,40 @@
 //@version=6
 // @description lib-zone — UDT Zone et helpers (chevauchement, contains, cycle de vie, FIFO). Couche 0 (aucune dépendance, ne dessine rien).
-//              Représente une zone de prix horizontale avec un état de cycle de vie. Consommée par lib-cmi, lib-fvg, lib-zone-draw.
+//              Représente une zone de prix horizontale avec un état de cycle de vie. Consommée par lib-signal, lib-fvg, lib-draw (drawZone).
 library("lib_zone", overlay = true)
 
 // ============================================================
 // Types
 // ============================================================
 
+// @enum ZoneSide — orientation logique d'une zone.
+export enum ZoneSide
+    BULL
+    BEAR
+
+// @enum ZoneState — état du cycle de vie d'une zone.
+//        - ACTIVE  : zone affichable et impactée par les events de marché.
+//        - PENDING : zone validée mais en attente (chevauchement avec une zone existante, etc.).
+//        - EXPIRED : zone à supprimer au prochain nettoyage.
+export enum ZoneState
+    ACTIVE
+    PENDING
+    EXPIRED
+
 // @type Zone — Zone de prix horizontale avec horizon temporel et cycle de vie.
 // @field top       Borne supérieure (prix).
 // @field bottom    Borne inférieure (prix).
 // @field leftTime  Timestamp ms du point de départ temporel de la zone.
-// @field side      "bull" | "bear" — orientation logique.
-// @field state     "active" | "pending" | "expired".
+// @field side      ZoneSide.BULL ou ZoneSide.BEAR.
+// @field state     ZoneState.ACTIVE / PENDING / EXPIRED.
 // @field tfMinutes Timeframe d'origine en minutes. Utile pour le filtrage MTF.
 export type Zone
-    float  top
-    float  bottom
-    int    leftTime
-    string side
-    string state
-    int    tfMinutes
+    float     top
+    float     bottom
+    int       leftTime
+    ZoneSide  side
+    ZoneState state
+    int       tfMinutes
 
 // ============================================================
 // Constructeurs
@@ -30,11 +44,11 @@ export type Zone
 // @param top       Borne haute.
 // @param bottom    Borne basse.
 // @param leftTime  Timestamp ms de début.
-// @param side      "bull" | "bear".
+// @param side      ZoneSide.BULL | ZoneSide.BEAR.
 // @param tfMinutes Timeframe d'origine en minutes.
-// @returns Zone (état "active").
-export newZone(float top, float bottom, int leftTime, string side, int tfMinutes) =>
-    Zone.new(top, bottom, leftTime, side, "active", tfMinutes)
+// @returns Zone (état ACTIVE).
+export newZone(float top, float bottom, int leftTime, ZoneSide side, int tfMinutes) =>
+    Zone.new(top, bottom, leftTime, side, ZoneState.ACTIVE, tfMinutes)
 
 // ============================================================
 // Helpers géométriques
@@ -59,22 +73,22 @@ export height(Zone z) =>
 
 // @function Marque la zone comme expirée (à supprimer au prochain nettoyage). Mutation in-place.
 export expire(Zone z) =>
-    z.state := "expired"
+    z.state := ZoneState.EXPIRED
     z
 
 // @function Marque la zone comme pending (en attente d'activation). Mutation in-place.
 export setPending(Zone z) =>
-    z.state := "pending"
+    z.state := ZoneState.PENDING
     z
 
 // @function Marque la zone comme active. Mutation in-place.
 export activate(Zone z) =>
-    z.state := "active"
+    z.state := ZoneState.ACTIVE
     z
 
-export isActive(Zone z)  => z.state == "active"
-export isPending(Zone z) => z.state == "pending"
-export isExpired(Zone z) => z.state == "expired"
+export isActive(Zone z)  => z.state == ZoneState.ACTIVE
+export isPending(Zone z) => z.state == ZoneState.PENDING
+export isExpired(Zone z) => z.state == ZoneState.EXPIRED
 
 // ============================================================
 // Helpers sur arrays<Zone>
@@ -87,7 +101,7 @@ export removeExpired(array<Zone> zones) =>
     if n > 0
         for i = n - 1 to 0
             z = array.get(zones, i)
-            if z.state == "expired"
+            if z.state == ZoneState.EXPIRED
                 array.remove(zones, i)
     zones
 
@@ -102,9 +116,11 @@ export trimOldest(array<Zone> zones, simple int maxCount) =>
 // @returns Zone | na
 export findOverlapping(array<Zone> zones, Zone z) =>
     Zone result = na
-    for i = 0 to array.size(zones) - 1
-        candidate = array.get(zones, i)
-        if candidate.state == "active" and overlap(candidate, z)
-            result := candidate
-            break
+    n = array.size(zones)
+    if n > 0
+        for i = 0 to n - 1
+            candidate = array.get(zones, i)
+            if candidate.state == ZoneState.ACTIVE and overlap(candidate, z)
+                result := candidate
+                break
     result

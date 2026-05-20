@@ -258,17 +258,15 @@ La detection identifie ces bougies sur plusieurs timeframes simultanement puis c
 
 **CMI Bullish (haussiere)** - toutes les conditions doivent etre reunies :
 1. L'open est **sous** la reference CMI
-2. La reference CMI est **descendante** (valeur actuelle < valeur precedente)
-3. La bougie **cloture au-dessus** de son open (bougie verte)
-4. La cloture **depasse le high de la meche precedente** (`close > high[1]`)
-5. L'open n'est **pas egal au low** (pas d'ouverture en extreme)
+2. La bougie **cloture au-dessus** de son open (bougie verte)
+3. La cloture **depasse le high de la meche precedente** (`close > high[1]`)
+4. L'open n'est **pas egal au low** (pas d'ouverture en extreme)
 
 **CMI Bearish (baissiere)** - toutes les conditions doivent etre reunies :
 1. L'open est **au-dessus** de la reference CMI
-2. La reference CMI est **ascendante** (valeur actuelle > valeur precedente)
-3. La bougie **cloture en-dessous** de son open (bougie rouge)
-4. La cloture **passe sous le low de la meche precedente** (`close < low[1]`)
-5. L'open n'est **pas egal au high** (pas d'ouverture en extreme)
+2. La bougie **cloture en-dessous** de son open (bougie rouge)
+3. La cloture **passe sous le low de la meche precedente** (`close < low[1]`)
+4. L'open n'est **pas egal au high** (pas d'ouverture en extreme)
 
 ### Validation 3 bougies
 
@@ -346,9 +344,31 @@ Les zones sont dessinees avec une transparence de fond de 85% et une transparenc
 
 ### 1. Supply/Demand
 
-Détecte les CMI dans l'UT affichée.
-La validation en 3 bougies n'est pas nécessaire.
-Identifie la bougie précédent la CMI, elle représente la zone de supply/demande
+Détecte les CMI dans l'UT affichée (cf. règles CMI section 3.1 sur zones-MTF).
+**Pas de validation en 3 bougies** (différence vs zones-MTF).
+
+**Construction de la zone** :
+- Quand une CMI est détectée sur la bougie courante, la **zone = bougie n-1 dans son intégralité** (mèches incluses) :
+  - `top = high[1]`
+  - `bottom = low[1]`
+- CMI bullish → zone **Demand** (= bullish, support potentiel). Label `Demand`.
+- CMI bearish → zone **Supply** (= bearish, résistance potentielle). Label `Supply`.
+- Terminologie : "Supply" et "Demand" sont les deux faces du même mécanisme, on ne dit pas "S/D bull/bear".
+
+**Lifecycle** :
+- La zone est créée `active` à la barre suivant la CMI.
+- **Morte au comblement total** :
+  - zone demand → mort quand `low <= bottom` (le prix a entièrement traversé la zone vers le bas).
+  - zone supply → mort quand `high >= top` (le prix a entièrement traversé vers le haut).
+- **Anti-chaînage** : une CMI qui tombe sur la barre **immédiatement après** une CMI ayant déjà
+  créé une zone est ignorée — pas de nouvelle zone créée. Justification : c'est une continuation
+  du même mouvement de retournement, pas une nouvelle interaction du marché.
+- **Anti-chevauchement par remplacement** : si une nouvelle zone S/D chevauche en prix une zone
+  active **du même side** déjà existante, l'ancienne est expirée et la nouvelle prend sa place.
+  Justification : les S/D sont court terme (réaction quasi-instantanée attendue) ; si le marché
+  revient sur la même zone, c'est la dernière interaction qui compte.
+- Les zones MTF ont des règles de persistance plus avancées (pending + réactivation +
+  expiration par TF) — pas applicables ici.
 
 ### 2. Fair Value Gaps (FVG)
 
@@ -359,7 +379,11 @@ Detecte les desequilibres de prix (zone non tradee entre 3 bougies consecutives)
 **FVG Bullish** : `low > high[2]` (le low de la bougie actuelle est au-dessus du high de 2 bougies avant)
 **FVG Bearish** : `high < low[2]` (le high de la bougie actuelle est en-dessous du low de 2 bougies avant)
 
-**Exclusion** : les FVG ne sont pas detectes dans les 3 premieres bougies d'une nouvelle journee (en intraday), pour eviter les faux gaps overnight.
+**Filtre anti-faux-gap** : le pattern 3-bougies est rejeté si l'une des 2 transitions
+(`bar[2] → bar[1]` ou `bar[1] → bar[0]`) franchit une période non tradée — détectée
+par un delta temporel `> 1.5 ×` la durée normale d'une barre. Couvre les fermetures
+overnight des marchés cash, les week-ends, et les breaks de session sans paramétrage
+ni fenêtre arbitraire de barres.
 
 #### Niveaux du FVG
 
@@ -390,15 +414,17 @@ Si ce filtre est activé, seules les zones 5 étoiles et le FVG associé sont af
 |---------|------|--------|
 | Safe mode | bool | false |
 | Supply/Demand | bool | true |
-| Bordure | string | solid |
-| Epaisseur | int | 1 |
-| Couleur Bullish | color | bleu |
-| Couleur Bullish | color | orange |
+| Bordure S/D | string | solid |
+| Epaisseur S/D | int | 1 |
+| Couleur S/D Bullish | color | bleu |
+| Couleur S/D Bearish | color | orange |
 | FVG | bool | true |
-| Couleur Bullish | color | vert |
-| Couleur Bearish | color | rouge |
+| Couleur FVG Bullish | color | vert |
+| Couleur FVG Bearish | color | rouge |
 | Bordure FVG | string | dashed |
 | Epaisseur FVG | int | 0 |
+
+Transparence de fond : 85% / Transparence de bordure : 40% (alignement avec zones-MTF).
 | Extend Right | bool | false |
 | Delete After Fill | bool | false |
 | FVG History | int | 100 (max 365) |
