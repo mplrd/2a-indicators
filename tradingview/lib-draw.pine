@@ -92,7 +92,7 @@ export resolveLevelStartAndExtend(series int startBar, series bool startBarFound
 // @param lineArr       Array des lignes pour gestion FIFO côté caller (push uniquement).
 // @param labelArr      Array des labels (push uniquement).
 // @returns series line — la ligne créée ou `na` si rien dessiné.
-export drawLevel(series bool show, float price, int startBar, bool startBarFound, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, simple bool isHigh, array<line> lineArr, array<label> labelArr) =>
+export drawLevel(series bool show, float price, int startBar, bool startBarFound, series color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, simple bool isHigh, array<line> lineArr, array<label> labelArr) =>
     line ln = na
     if show and not na(price)
         [startX, extendMode] = resolveLevelStartAndExtend(startBar, startBarFound)
@@ -134,7 +134,7 @@ export drawLevel(series bool show, float price, int startBar, bool startBarFound
 // @param lineArr    Array des lignes (push).
 // @param labelArr   Array des labels (push).
 // @returns series line — la ligne créée ou `na`.
-export drawSessionLevel(series bool show, float price, int startTime, int endTime, series bool ongoing, simple color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, simple bool isHigh, array<line> lineArr, array<label> labelArr) =>
+export drawSessionLevel(series bool show, float price, int startTime, int endTime, series bool ongoing, series color col, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, simple bool isHigh, array<line> lineArr, array<label> labelArr) =>
     line ln = na
     drawable = show and not na(price) and not na(startTime) and (ongoing or not na(endTime))
     if drawable

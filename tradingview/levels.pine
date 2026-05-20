@@ -5,8 +5,10 @@ indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_cou
 // ============================================================
 // Imports
 // ============================================================
-import mpilard/lib_levels/12 as levels
-import mpilard/lib_draw/11   as draw
+import mpilard/lib_levels/12    as levels
+import mpilard/lib_draw/12      as draw
+import mpilard/lib_supertrend/1 as st
+// gaps : déplacés vers zones-MTF.pine. lib_gap importée là-bas.
 
 // TZ d'affichage du chart. Pine v6 n'expose pas la TZ d'affichage, donc on la hardcode pour
 // le projet (Europe/Paris). Contrôle "minuit chart" = quand les sessions/OR reset.
@@ -16,69 +18,85 @@ chartTz = "Europe/Paris"
 // Inputs
 // ============================================================
 
-var levelsGroup = "Niveaux"
+var displayGroup  = "Affichage"
+var htfGroup      = "Niveaux HTF"
+var stGroup       = "Supertrend"
+var intradayGroup = "Niveaux Intraday"
 
-showLabels = input.bool(true, "Afficher les labels", inline = "labels", group = levelsGroup)
+showLabels = input.bool(true, "Afficher les labels", group = displayGroup)
 
-athEnabled = input.bool(true,                       "ATH", inline = "ath_level", group = levelsGroup)
-athColor   = input.color(#8B0000,                   "",    inline = "ath_level", group = levelsGroup)
-athStyle   = input.enum(draw.LineStyle.DASHED,      "",    inline = "ath_level", group = levelsGroup)
-athWidth   = input.int(2,                           "",    inline = "ath_level", group = levelsGroup, minval = 1, maxval = 5)
+// === Niveaux HTF ===
+athEnabled = input.bool(true,                       "ATH", inline = "ath_level", group = htfGroup)
+athColor   = input.color(#8B0000,                   "",    inline = "ath_level", group = htfGroup)
+athStyle   = input.enum(draw.LineStyle.DASHED,      "",    inline = "ath_level", group = htfGroup)
+athWidth   = input.int(2,                           "",    inline = "ath_level", group = htfGroup, minval = 1, maxval = 5)
 
-dailyEnabled = input.bool(true,                     "Daily (PDH/PDL)", inline = "daily_level", group = levelsGroup)
-dailyColor   = input.color(#555555,                 "",                inline = "daily_level", group = levelsGroup)
-dailyStyle   = input.enum(draw.LineStyle.SOLID,     "",                inline = "daily_level", group = levelsGroup)
-dailyWidth   = input.int(1,                         "",                inline = "daily_level", group = levelsGroup, minval = 1, maxval = 5)
+dailyEnabled = input.bool(true,                     "Daily (PDH/PDL)", inline = "daily_level", group = htfGroup)
+dailyColor   = input.color(#555555,                 "",                inline = "daily_level", group = htfGroup)
+dailyStyle   = input.enum(draw.LineStyle.DASHED,    "",                inline = "daily_level", group = htfGroup)
+dailyWidth   = input.int(2,                         "",                inline = "daily_level", group = htfGroup, minval = 1, maxval = 5)
 
-weeklyEnabled = input.bool(true,                    "Weekly (PWH/PWL)", inline = "weekly_level", group = levelsGroup)
-weeklyColor   = input.color(#555555,                "",                 inline = "weekly_level", group = levelsGroup)
-weeklyStyle   = input.enum(draw.LineStyle.SOLID,    "",                 inline = "weekly_level", group = levelsGroup)
-weeklyWidth   = input.int(2,                        "",                 inline = "weekly_level", group = levelsGroup, minval = 1, maxval = 5)
+weeklyEnabled = input.bool(true,                    "Weekly (PWH/PWL)", inline = "weekly_level", group = htfGroup)
+weeklyColor   = input.color(#555555,                "",                 inline = "weekly_level", group = htfGroup)
+weeklyStyle   = input.enum(draw.LineStyle.SOLID,    "",                 inline = "weekly_level", group = htfGroup)
+weeklyWidth   = input.int(2,                        "",                 inline = "weekly_level", group = htfGroup, minval = 1, maxval = 5)
 
-monthlyEnabled = input.bool(true,                   "Monthly (PMH/PML)", inline = "monthly_level", group = levelsGroup)
-monthlyColor   = input.color(#555555,               "",                  inline = "monthly_level", group = levelsGroup)
-monthlyStyle   = input.enum(draw.LineStyle.SOLID,   "",                  inline = "monthly_level", group = levelsGroup)
-monthlyWidth   = input.int(3,                       "",                  inline = "monthly_level", group = levelsGroup, minval = 1, maxval = 5)
+monthlyEnabled = input.bool(true,                   "Monthly (PMH/PML)", inline = "monthly_level", group = htfGroup)
+monthlyColor   = input.color(#555555,               "",                  inline = "monthly_level", group = htfGroup)
+monthlyStyle   = input.enum(draw.LineStyle.SOLID,   "",                  inline = "monthly_level", group = htfGroup)
+monthlyWidth   = input.int(3,                       "",                  inline = "monthly_level", group = htfGroup, minval = 1, maxval = 5)
 
-// --- Sessions (intraday uniquement) ---
-asianEnabled = input.bool(true,                      "Session Asiatique",  inline = "asian_session",  group = levelsGroup)
-asianColor   = input.color(color.orange,             "",                   inline = "asian_session",  group = levelsGroup)
-asianStyle   = input.enum(draw.LineStyle.SOLID,      "",                   inline = "asian_session",  group = levelsGroup)
-asianWidth   = input.int(1,                          "",                   inline = "asian_session",  group = levelsGroup, minval = 1, maxval = 5)
+// === Supertrend Daily / Weekly ===
+// Couleurs bull/bear partagées entre ST D et ST W ; appliquées dynamiquement selon la direction.
+// Paramètres ATR/Factor du Supertrend hardcodés à 10 / 3.0 (defaults projet).
+stBullColor = input.color(color.green, "Bull", inline = "st_colors", group = stGroup)
+stBearColor = input.color(color.red,   "Bear", inline = "st_colors", group = stGroup)
 
-euEnabled = input.bool(false,                        "Session Européenne", inline = "eu_session",     group = levelsGroup)
-euColor   = input.color(color.blue,                  "",                   inline = "eu_session",     group = levelsGroup)
-euStyle   = input.enum(draw.LineStyle.SOLID,         "",                   inline = "eu_session",     group = levelsGroup)
-euWidth   = input.int(1,                             "",                   inline = "eu_session",     group = levelsGroup, minval = 1, maxval = 5)
+stDEnabled = input.bool(true,                      "Supertrend D", inline = "st_d", group = stGroup)
+stDStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "st_d", group = stGroup)
+stDWidth   = input.int(2,                          "",             inline = "st_d", group = stGroup, minval = 1, maxval = 5)
 
-usEnabled = input.bool(false,                        "Session Américaine", inline = "us_session",     group = levelsGroup)
-usColor   = input.color(color.purple,                "",                   inline = "us_session",     group = levelsGroup)
-usStyle   = input.enum(draw.LineStyle.SOLID,         "",                   inline = "us_session",     group = levelsGroup)
-usWidth   = input.int(1,                             "",                   inline = "us_session",     group = levelsGroup, minval = 1, maxval = 5)
+stWEnabled = input.bool(true,                      "Supertrend W", inline = "st_w", group = stGroup)
+stWStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "st_w", group = stGroup)
+stWWidth   = input.int(3,                          "",             inline = "st_w", group = stGroup, minval = 1, maxval = 5)
 
-// --- Open Range + Opens ---
-// Open Range = H/L des 60 premières minutes du jour (règle "date change vs barre précédente",
-// dans la TZ naturelle de l'instrument). 3 Open toggles (Future/EU/US) indépendants — chacun
-// dessine son open si la session correspondante a été observée aujourd'hui.
-orEnabled = input.bool(true,                         "Open Range",         inline = "or_level",       group = levelsGroup)
-orColor   = input.color(#555555,                     "",                   inline = "or_level",       group = levelsGroup)
-orStyle   = input.enum(draw.LineStyle.DOTTED,        "",                   inline = "or_level",       group = levelsGroup)
-orWidth   = input.int(1,                             "",                   inline = "or_level",       group = levelsGroup, minval = 1, maxval = 5)
+// === Niveaux Intraday ===
+// Sessions
+asianEnabled = input.bool(true,                      "Session Asiatique",  inline = "asian_session",  group = intradayGroup)
+asianColor   = input.color(color.orange,             "",                   inline = "asian_session",  group = intradayGroup)
+asianStyle   = input.enum(draw.LineStyle.DASHED,     "",                   inline = "asian_session",  group = intradayGroup)
+asianWidth   = input.int(2,                          "",                   inline = "asian_session",  group = intradayGroup, minval = 1, maxval = 5)
 
-openFutureEnabled = input.bool(true,                  "Open Future",        inline = "open_future",    group = levelsGroup)
-openFutureColor   = input.color(#555555,              "",                   inline = "open_future",    group = levelsGroup)
-openFutureStyle   = input.enum(draw.LineStyle.DOTTED, "",                   inline = "open_future",    group = levelsGroup)
-openFutureWidth   = input.int(1,                      "",                   inline = "open_future",    group = levelsGroup, minval = 1, maxval = 5)
+euEnabled = input.bool(false,                        "Session Européenne", inline = "eu_session",     group = intradayGroup)
+euColor   = input.color(color.blue,                  "",                   inline = "eu_session",     group = intradayGroup)
+euStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "eu_session",     group = intradayGroup)
+euWidth   = input.int(2,                             "",                   inline = "eu_session",     group = intradayGroup, minval = 1, maxval = 5)
 
-openEUEnabled = input.bool(true,                      "Open EU",            inline = "open_eu",        group = levelsGroup)
-openEUColor   = input.color(color.blue,               "",                   inline = "open_eu",        group = levelsGroup)
-openEUStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_eu",        group = levelsGroup)
-openEUWidth   = input.int(1,                          "",                   inline = "open_eu",        group = levelsGroup, minval = 1, maxval = 5)
+usEnabled = input.bool(false,                        "Session Américaine", inline = "us_session",     group = intradayGroup)
+usColor   = input.color(color.purple,                "",                   inline = "us_session",     group = intradayGroup)
+usStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "us_session",     group = intradayGroup)
+usWidth   = input.int(2,                             "",                   inline = "us_session",     group = intradayGroup, minval = 1, maxval = 5)
 
-openUSEnabled = input.bool(true,                      "Open US",            inline = "open_us",        group = levelsGroup)
-openUSColor   = input.color(color.purple,             "",                   inline = "open_us",        group = levelsGroup)
-openUSStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_us",        group = levelsGroup)
-openUSWidth   = input.int(1,                          "",                   inline = "open_us",        group = levelsGroup, minval = 1, maxval = 5)
+// Open Range + Opens
+orEnabled = input.bool(true,                         "Open Range",         inline = "or_level",       group = intradayGroup)
+orColor   = input.color(#000000,                     "",                   inline = "or_level",       group = intradayGroup)
+orStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "or_level",       group = intradayGroup)
+orWidth   = input.int(1,                             "",                   inline = "or_level",       group = intradayGroup, minval = 1, maxval = 5)
+
+openFutureEnabled = input.bool(true,                  "Open Future",        inline = "open_future",    group = intradayGroup)
+openFutureColor   = input.color(#555555,              "",                   inline = "open_future",    group = intradayGroup)
+openFutureStyle   = input.enum(draw.LineStyle.DOTTED, "",                   inline = "open_future",    group = intradayGroup)
+openFutureWidth   = input.int(1,                      "",                   inline = "open_future",    group = intradayGroup, minval = 1, maxval = 5)
+
+openEUEnabled = input.bool(true,                      "Open EU",            inline = "open_eu",        group = intradayGroup)
+openEUColor   = input.color(color.blue,               "",                   inline = "open_eu",        group = intradayGroup)
+openEUStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_eu",        group = intradayGroup)
+openEUWidth   = input.int(1,                          "",                   inline = "open_eu",        group = intradayGroup, minval = 1, maxval = 5)
+
+openUSEnabled = input.bool(true,                      "Open US",            inline = "open_us",        group = intradayGroup)
+openUSColor   = input.color(color.purple,             "",                   inline = "open_us",        group = intradayGroup)
+openUSStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_us",        group = intradayGroup)
+openUSWidth   = input.int(1,                          "",                   inline = "open_us",        group = intradayGroup, minval = 1, maxval = 5)
 
 // --- Paramètres des Sessions ---
 var sessionParamsGroup = "Paramètres des Sessions"
@@ -100,6 +118,10 @@ tfSec       = timeframe.in_seconds()
 showDaily   = tfSec <= timeframe.in_seconds("D")
 showWeekly  = tfSec <= timeframe.in_seconds("W")
 showMonthly = tfSec <= timeframe.in_seconds("M")
+// Supertrend D/W : strict < D / strict < W (Layout affiche le ST sur leur propre UT, on ne
+// double pas comme niveau là-bas).
+showSTD = tfSec < timeframe.in_seconds("D")
+showSTW = tfSec < timeframe.in_seconds("W")
 // Niveaux intraday (sessions, opens, open range) : strict < H1 (M1 à M30).
 showIntraday = tfSec < 3600
 
@@ -115,6 +137,13 @@ pwStartBar = levels.previousPeriodStartBar("W")
 pmStartBar = levels.previousPeriodStartBar("M")
 
 [athValue, athBar, athBarFound] = levels.ath()
+
+// Supertrend Daily / Weekly. ATR/Factor hardcodés (10, 3.0). Direction colore la ligne (bull/bear).
+// `isHigh` du label reste hardcoded `false` (Pine n'autorise pas `simple bool` dérivé de `series`).
+[stDVal, stDDir] = request.security(syminfo.tickerid, "D", st.run(10, 3.0), lookahead = barmerge.lookahead_on)
+[stWVal, stWDir] = request.security(syminfo.tickerid, "W", st.run(10, 3.0), lookahead = barmerge.lookahead_on)
+stDActiveColor = stDDir > 0 ? stBullColor : stBearColor
+stWActiveColor = stWDir > 0 ? stBullColor : stBearColor
 
 // Sessions H/L — visibles toute la journée chart, reset à minuit chart (00h Paris).
 [asianH, asianL, asianStart, asianEnd, asianSeen, asianInS] = levels.sessionHL(asianSessionStr, asianTz, chartTz)
@@ -162,6 +191,10 @@ if barstate.islast
     draw.drawLevel(monthlyEnabled and showMonthly, pmH, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PMH", showLabels, true,  lineArr, labelArr)
     draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, false, lineArr, labelArr)
 
+    // Supertrend D / W — couleur dynamique selon direction (bull/bear). Strict < D / W.
+    draw.drawLevel(stDEnabled and showSTD, stDVal, na, false, stDActiveColor, stDWidth, stDStyle, "ST D", showLabels, false, lineArr, labelArr)
+    draw.drawLevel(stWEnabled and showSTW, stWVal, na, false, stWActiveColor, stWWidth, stWStyle, "ST W", showLabels, false, lineArr, labelArr)
+
     // Sessions H/L (intraday strict < H1). Bornées à sEnd connue dès le début de session
     // (parsing du sessionStr côté lib) → plus d'extend.right pendant la session.
     draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianH, asianStart, asianEnd, false, asianColor, asianWidth, asianStyle, "Asian H", showLabels, true,  lineArr, labelArr)
@@ -171,10 +204,10 @@ if barstate.islast
     draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usH,    usStart,    usEnd,    false, usColor,    usWidth,    usStyle,    "US H",    showLabels, true,  lineArr, labelArr)
     draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usL,    usStart,    usEnd,    false, usColor,    usWidth,    usStyle,    "US L",    showLabels, false, lineArr, labelArr)
 
-    // Opens : ligne bornée à la fin de la session correspondante (sEnd connue, ongoing=false).
-    draw.drawSessionLevel(openFutureEnabled and showIntraday and futureOpenSeen, futureOpen, futureOpenTime, futureEnd, false, openFutureColor, openFutureWidth, openFutureStyle, "Open Future", showLabels, true, lineArr, labelArr)
-    draw.drawSessionLevel(openEUEnabled     and showIntraday and euOpenSeen,     euOpen,     euOpenTime,     euEnd,     false, openEUColor,     openEUWidth,     openEUStyle,     "Open EU",     showLabels, true, lineArr, labelArr)
-    draw.drawSessionLevel(openUSEnabled     and showIntraday and usOpenSeen,     usOpen,     usOpenTime,     usEnd,     false, openUSColor,     openUSWidth,     openUSStyle,     "Open US",     showLabels, true, lineArr, labelArr)
+    // Opens : ligne extend.right (ongoing=true) — visible toute la journée chart, reset à minuit chart.
+    draw.drawSessionLevel(openFutureEnabled and showIntraday and futureOpenSeen, futureOpen, futureOpenTime, futureEnd, true, openFutureColor, openFutureWidth, openFutureStyle, "Open Future", showLabels, true, lineArr, labelArr)
+    draw.drawSessionLevel(openEUEnabled     and showIntraday and euOpenSeen,     euOpen,     euOpenTime,     euEnd,     true, openEUColor,     openEUWidth,     openEUStyle,     "Open EU",     showLabels, true, lineArr, labelArr)
+    draw.drawSessionLevel(openUSEnabled     and showIntraday and usOpenSeen,     usOpen,     usOpenTime,     usEnd,     true, openUSColor,     openUSWidth,     openUSStyle,     "Open US",     showLabels, true, lineArr, labelArr)
 
     // Open Range : H/L figés après 60min, mais la LIGNE persiste toute la journée chart
     // (extend.right, ongoing=true). Au prochain minuit chart, openRange() ré-init.
