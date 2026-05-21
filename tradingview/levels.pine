@@ -192,8 +192,15 @@ if barstate.islast
     draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, false, lineArr, labelArr)
 
     // Supertrend D / W — couleur dynamique selon direction (bull/bear). Strict < D / W.
-    draw.drawLevel(stDEnabled and showSTD, stDVal, na, false, stDActiveColor, stDWidth, stDStyle, "ST D", showLabels, false, lineArr, labelArr)
-    draw.drawLevel(stWEnabled and showSTW, stWVal, na, false, stWActiveColor, stWWidth, stWStyle, "ST W", showLabels, false, lineArr, labelArr)
+    // Position du label adaptative : niveau au-dessus du prix → label au-dessus (isHigh=true) ;
+    // niveau en-dessous → label en-dessous (isHigh=false). Pine n'accepte pas un `simple bool`
+    // dérivé d'une `series` → 2 appels mutuellement exclusifs via `show`.
+    stDAbovePrice = stDVal > close
+    stWAbovePrice = stWVal > close
+    draw.drawLevel(stDEnabled and showSTD and stDAbovePrice,       stDVal, na, false, stDActiveColor, stDWidth, stDStyle, "ST D", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(stDEnabled and showSTD and (not stDAbovePrice), stDVal, na, false, stDActiveColor, stDWidth, stDStyle, "ST D", showLabels, false, lineArr, labelArr)
+    draw.drawLevel(stWEnabled and showSTW and stWAbovePrice,       stWVal, na, false, stWActiveColor, stWWidth, stWStyle, "ST W", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(stWEnabled and showSTW and (not stWAbovePrice), stWVal, na, false, stWActiveColor, stWWidth, stWStyle, "ST W", showLabels, false, lineArr, labelArr)
 
     // Sessions H/L (intraday strict < H1). Bornées à sEnd connue dès le début de session
     // (parsing du sessionStr côté lib) → plus d'extend.right pendant la session.
