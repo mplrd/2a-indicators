@@ -10,7 +10,7 @@ import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_draw/12      as draw
+import mpilard/lib_draw/15      as draw
 
 // ============================================================
 // Inputs — UI organisée façon legacy : un inline= par feature, titres vides après le 1er, dropdown

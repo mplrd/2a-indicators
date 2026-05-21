@@ -119,6 +119,31 @@ export drawLevel(series bool show, float price, int startBar, bool startBarFound
             array.push(labelArr, lb)
     ln
 
+// @function Dessine un niveau horizontal avec **couleur et position de label dynamiques** selon
+//           la position de `price` par rapport au `close` courant.
+//           - `price > close` (niveau au-dessus du prix = résistance) → couleur `bearColor`,
+//             label au-dessus de la ligne (`isHigh = true`).
+//           - `price <= close` (niveau en-dessous = support)          → couleur `bullColor`,
+//             label en-dessous (`isHigh = false`).
+//           Implémenté via 2 appels `drawLevel` mutuellement exclusifs sur `show` (Pine n'accepte
+//           pas un `simple bool` dérivé d'une `series` pour `isHigh`). Seul un des deux dessine.
+// @param show       Toggle global (peut être series).
+// @param price      Prix du niveau.
+// @param bullColor  Couleur pour un niveau de SUPPORT (sous le prix).
+// @param bearColor  Couleur pour un niveau de RÉSISTANCE (au-dessus du prix).
+// @param width      Épaisseur de ligne.
+// @param styleEnum  Style de ligne.
+// @param lbl        Texte du label.
+// @param showLbl    Toggle d'affichage du label.
+// @param lineArr    Array des lignes (push).
+// @param labelArr   Array des labels (push).
+export drawDynamicLevel(series bool show, float price, series color bullColor, series color bearColor, simple int width, simple LineStyle styleEnum, simple string lbl, simple bool showLbl, array<line> lineArr, array<label> labelArr) =>
+    above = price > close
+    col   = above ? bearColor : bullColor
+    naBar = int(na)
+    drawLevel(show and above,       price, naBar, false, col, width, styleEnum, lbl, showLbl, true,  lineArr, labelArr)
+    drawLevel(show and (not above), price, naBar, false, col, width, styleEnum, lbl, showLbl, false, lineArr, labelArr)
+
 // @function Dessine un niveau horizontal borné dans le temps (sessions, open range, opens).
 //           - Si `ongoing = true` : la ligne s'étend à droite (session en cours). Le label est
 //             placé à `bar_index + 20` en `xloc.bar_index` (aligné avec `drawLevel`).
