@@ -401,12 +401,17 @@ Si "Delete After Fill" est actif :
 
 ### 3. Zones "5 étoiles"
 
-Il s'agit de zones de supply/demand qui a déclenché la formation d'un FVG sur la CMI.
-Le FVG est alors "collé" à la zone de supply/demand et en fait une zone d'intéret "5 étoiles"
+Il s'agit de zones de supply/demand qui ont déclenché la formation d'un FVG sur la CMI.
+Le FVG est alors "collé" à la zone de supply/demand et en fait une zone d'intérêt "5 étoiles".
+
+**Implémentation** : pas de rendu spécifique — une 5★ est simplement la superposition visuelle
+d'une zone S/D et d'un FVG du **même side** sur la même plage de prix. La combinaison émerge
+naturellement du rendu des deux types.
 
 ### 4. Filtre "Safe mode"
 
-Si ce filtre est activé, seules les zones 5 étoiles et le FVG associé sont affichés
+Si ce filtre est activé, seules les zones 5 étoiles (S/D + FVG alignés, même side, chevauchement
+en prix) sont affichées. Les S/D isolés et les FVG isolés sont masqués au rendu.
 
 #### Settings
 
