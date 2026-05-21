@@ -1,6 +1,10 @@
 //@version=6
-// @description lib-draw — primitives de rendu : styles, couleurs, helpers. Couche 2 (aucune logique métier, dessine ce qu'on lui passe).
+// @description lib-draw — primitives de rendu : styles, couleurs, helpers de niveaux et de zones.
+//              Couche 2 (aucune logique métier, dessine ce qu'on lui passe).
 library("lib_draw", overlay = true)
+
+// Import lib_zone pour drawZone — lib_zone doit être publiée AVANT de pouvoir bump lib_draw.
+import mpilard/lib_zone/1 as zone
 
 // ============================================================
 // Styles de ligne — enum + helpers
@@ -165,3 +169,45 @@ export drawSessionLevel(series bool show, float price, int startTime, int endTim
                   force_overlay = true)
                 array.push(labelArr, lb)
     ln
+
+// ============================================================
+// Zones — rendu d'une `lib_zone.Zone` en `box`
+// ============================================================
+
+// @function Dessine une `Zone` en `box` rectangulaire. Box ancrée à `z.leftTime`, étendue à droite.
+//           Ne dessine RIEN si la zone n'est pas `active` (cf. `lib_zone.isActive`).
+//           Le label (optionnel) est placé à droite du chart, centré verticalement sur la zone.
+// @param show         Toggle global.
+// @param z            Zone à dessiner (cf. `lib_zone.Zone`).
+// @param col          Couleur de bordure et fond.
+// @param borderWidth  Épaisseur de bordure (0 = bordure invisible).
+// @param borderStyle  Style de bordure (`LineStyle.SOLID` / `DASHED` / `DOTTED`).
+// @param bgAlpha      Transparence du fond (0 = opaque, 100 = invisible).
+// @param borderAlpha  Transparence de la bordure.
+// @param showLbl      Toggle d'affichage du label.
+// @param lbl          Texte du label (ex : "S/D bull", "FVG bear"). `""` = pas de label même si `showLbl=true`.
+// @param boxArr       Array des boxes (push uniquement, le caller gère le nettoyage).
+// @param labelArr     Array des labels (push uniquement).
+// @returns series box — la box créée ou `na`.
+export drawZone(series bool show, zone.Zone z, series color col, simple int borderWidth, simple LineStyle borderStyle, simple int bgAlpha, simple int borderAlpha, simple bool showLbl, series string lbl, array<box> boxArr, array<label> labelArr) =>
+    box bx = na
+    if show and not na(z) and zone.isActive(z)
+        oneBarMs = timeframe.in_seconds() * 1000
+        bx := box.new(
+          left = z.leftTime, top = z.top, right = time + oneBarMs * 5, bottom = z.bottom,
+          xloc = xloc.bar_time,
+          border_color = color.new(col, borderAlpha),
+          bgcolor = color.new(col, bgAlpha),
+          border_width = borderWidth,
+          border_style = borderStyle == LineStyle.DASHED ? line.style_dashed : borderStyle == LineStyle.DOTTED ? line.style_dotted : line.style_solid,
+          extend = extend.right,
+          force_overlay = true)
+        array.push(boxArr, bx)
+        if showLbl and lbl != ""
+            lb = label.new(
+              x = bar_index + 20, y = (z.top + z.bottom) / 2.0, text = lbl,
+              xloc = xloc.bar_index, style = label.style_label_center,
+              color = col, textcolor = color.white, size = size.small,
+              force_overlay = true)
+            array.push(labelArr, lb)
+    bx

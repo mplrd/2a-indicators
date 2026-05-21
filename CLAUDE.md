@@ -31,14 +31,14 @@ indicators/
 │   ├── lib-ma.pine          # SMA, ribbon (SMA ± std)                                (dep: lib-bollinger)
 │   ├── lib-ichimoku.pine    # Tenkan / Kijun / Senkou A&B / Chikou
 │   ├── lib-supertrend.pine  # Line + dir normalisée ±1
-│   ├── lib-cmi.pine         # Signal bull/bear, validation 3 bougies, construit Zone (dep: lib-zone, lib-series)
-│   ├── lib-fvg.pine         # Signal, niveaux, comblement, retourne une Zone         (dep: lib-zone)
+│   ├── lib-signal.pine      # Bougies de signal : CMI, englobantes, open en extrême (dep: lib-series)
+│   ├── lib-sd.pine          # Supply/Demand zones lifecycle current TF              (dep: lib-zone, lib-signal)
+│   ├── lib-fvg.pine         # Détection FVG, niveaux, comblement, retourne une Zone (dep: lib-zone)
 │   ├── lib-gap.pine         # Détection gap daily + cycle de vie                     (dep: lib-time)
-│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, IBR                (dep: lib-time, lib-market)
+│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, OR                 (dep: lib-time, lib-market)
 │   │
 │   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
-│   ├── lib-draw.pine        # Palette, styles, withAlpha, drawLevel, drawBox, fillCloud, FIFO
-│   ├── lib-zone-draw.pine   # renderZone(Zone, style)                               (dep: lib-zone, lib-draw)
+│   ├── lib-draw.pine        # Palette, styles, drawLevel, drawSessionLevel, drawZone  (dep: lib-zone pour drawZone)
 │   │
 │   │  --- Indicateurs ---
 │   ├── layout.pine          # 2Ai Layout
