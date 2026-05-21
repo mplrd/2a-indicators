@@ -32,6 +32,7 @@ indicators/
 │   ├── lib-ichimoku.pine    # Tenkan / Kijun / Senkou A&B / Chikou
 │   ├── lib-supertrend.pine  # Line + dir normalisée ±1
 │   ├── lib-signal.pine      # Bougies de signal : CMI, englobantes, open en extrême (dep: lib-series)
+│   ├── lib-sd.pine          # Supply/Demand zones lifecycle current TF              (dep: lib-zone, lib-signal)
 │   ├── lib-fvg.pine         # Détection FVG, niveaux, comblement, retourne une Zone (dep: lib-zone)
 │   ├── lib-gap.pine         # Détection gap daily + cycle de vie                     (dep: lib-time)
 │   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, OR                 (dep: lib-time, lib-market)
