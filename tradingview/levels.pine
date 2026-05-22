@@ -10,6 +10,7 @@ import mpilard/lib_draw/15      as draw
 import mpilard/lib_supertrend/1 as st
 import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_series/2     as series
+import mpilard/lib_structure/3  as structure
 // gaps : déplacés vers zones-MTF.pine. lib_gap importée là-bas.
 
 // TZ d'affichage du chart. Pine v6 n'expose pas la TZ d'affichage, donc on la hardcode pour
@@ -20,9 +21,10 @@ chartTz = "Europe/Paris"
 // Inputs
 // ============================================================
 
-var htfGroup      = "Niveaux HTF"
-var dynGroup      = "Niveaux dynamiques (Supertrend / BB / MA)"
-var intradayGroup = "Niveaux Intraday"
+var htfGroup       = "Niveaux HTF"
+var structureGroup = "Structure de marché"
+var dynGroup       = "Niveaux dynamiques (Supertrend / BB / MA)"
+var intradayGroup  = "Niveaux Intraday"
 
 // === Niveaux HTF ===
 athEnabled = input.bool(true,                       "ATH", inline = "ath_level", group = htfGroup)
@@ -44,6 +46,16 @@ monthlyEnabled = input.bool(true,                   "Monthly (PMH/PML)", inline 
 monthlyColor   = input.color(#555555,               "",                  inline = "monthly_level", group = htfGroup)
 monthlyStyle   = input.enum(draw.LineStyle.SOLID,   "",                  inline = "monthly_level", group = htfGroup)
 monthlyWidth   = input.int(3,                       "",                  inline = "monthly_level", group = htfGroup, minval = 1, maxval = 5)
+
+// === Structure de marché ===
+// Couleurs Bull/Bear partagées (pattern ST), déclarées AVANT la ligne d'activation pour
+// apparaître au-dessus dans la modal.
+ipaBullColor = input.color(color.blue,            "Bull", inline = "ipa_colors", group = structureGroup)
+ipaBearColor = input.color(color.red,             "Bear", inline = "ipa_colors", group = structureGroup)
+
+ipaEnabled   = input.bool(true,                   "IPA", inline = "ipa", group = structureGroup)
+ipaStyle     = input.enum(draw.LineStyle.DASHED,  "",    inline = "ipa", group = structureGroup)
+ipaWidth     = input.int(2,                       "",    inline = "ipa", group = structureGroup, minval = 1, maxval = 5)
 
 // === Supertrend Daily / Weekly ===
 // Couleurs bull/bear partagées entre ST D et ST W ; appliquées dynamiquement selon la direction.
@@ -132,6 +144,8 @@ var globalsGroup = "Paramètres globaux"
 showLabels    = input.bool(true,   "Afficher les labels", group = globalsGroup)
 flatPeriod    = input.int(2,       "Période flat",        inline = "flat_params", group = globalsGroup, minval = 1,     maxval = 20)
 flatThreshold = input.float(0.015, "Seuil flat %",        inline = "flat_params", group = globalsGroup, minval = 0.001, maxval = 1.0, step = 0.001)
+ipaPivotN     = input.int(3,       "Pivot IPA",             inline = "ipa_params",  group = globalsGroup, minval = 1,     maxval = 50)
+ipaMaxN       = input.int(25,      "Max IPA",             inline = "ipa_params",  group = globalsGroup, minval = 1,     maxval = 200)
 
 // ============================================================
 // Filtres TF d'affichage
@@ -225,6 +239,11 @@ ma200W = request.security(syminfo.tickerid, "W", ta.sma(close, 200))
 // Open Range — H/L des 60 premières minutes du jour chart (TZ chart hardcodée Europe/Paris).
 [orH, orL, orStart, orEnd, _orSeen] = levels.openRange(chartTz)
 
+// IPA — Structure de marché (TF courante, recompilée à chaque barre).
+// Lifecycle complet (détection pivots + pending + breaks + retests + anti-amas + FIFO) dans la lib.
+var array<structure.IPA> ipas = array.new<structure.IPA>()
+structure.updateIPAs(ipas, ipaPivotN, ipaMaxN)
+
 // ============================================================
 // Rendu — refresh à chaque tick sur la dernière barre
 // Dessin délégué à `draw.drawLevel()` (Couche 2). L'indicateur n'orchestre que.
@@ -258,6 +277,15 @@ if barstate.islast
     // PMH / PML
     draw.drawLevel(monthlyEnabled and showMonthly, pmH, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PMH", showLabels, true,  lineArr, labelArr)
     draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, false, lineArr, labelArr)
+
+    // IPA — Structure de marché : ray depuis le pivot, couleur dynamique Bull/Bear selon
+    // position vs prix. `drawLevel.isHigh` est `simple bool` → 2 appels mutuellement exclusifs.
+    for ipa in ipas
+        if ipa.broken
+            above = ipa.price > close
+            col   = above ? ipaBearColor : ipaBullColor
+            draw.drawLevel(ipaEnabled and above,       ipa.price, ipa.bar, true, col, ipaWidth, ipaStyle, "", false, true,  lineArr, labelArr)
+            draw.drawLevel(ipaEnabled and (not above), ipa.price, ipa.bar, true, col, ipaWidth, ipaStyle, "", false, false, lineArr, labelArr)
 
     // Supertrend D / W — couleur dynamique selon direction (bull/bear). Strict < D / W.
     // Position du label adaptative : niveau au-dessus du prix → label au-dessus (isHigh=true) ;
