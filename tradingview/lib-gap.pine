@@ -13,13 +13,14 @@ export enum GapDirection
     BEARISH
 
 // @type Gap — gap daily avec état de comblement.
-//        - startTime  : ms du début du jour chart où le gap a été détecté
+//        - startBar   : bar_index de la barre qui OUVRE le gap (1re barre de la période = N). Le
+//                       consommateur décale l'affichage d'1 barre en arrière (N-1) en xloc.bar_index.
 //        - topPrice   : bord supérieur (descend en partial fill bull)
 //        - bottomPrice: bord inférieur (monte en partial fill bear)
 //        - direction  : BULLISH ou BEARISH
 //        - filled     : true quand totalement comblé (le consommateur peut filtrer au rendu)
 export type Gap
-    int          startTime
+    int          startBar
     float        topPrice
     float        bottomPrice
     GapDirection direction
@@ -29,48 +30,57 @@ export type Gap
 // Détection
 // ============================================================
 
-// @function Détecte un gap daily à la N-ième barre après le day-change chart. La fenêtre d'attente
-//           laisse le marché se stabiliser pour éviter les faux gaps cash structurels (sur les
-//           instruments cash, la 1re barre du jour est toujours décalée vs cloture veille — ce n'est
-//           pas un "vrai" gap de prix).
+// @function Détecte un gap à la N-ième barre après le début de période. TF-aware :
+//           - Chart intraday : la "période" est la journée chart (day-change via `chartTz`).
+//             `barsToWait` (3 = spec) laisse passer les premières bougies pour éviter les faux
+//             gaps cash structurels (sur cash, la 1re barre du jour est toujours décalée vs
+//             cloture veille — ce n'est pas un "vrai" gap de prix).
+//           - Chart Daily+ : chaque barre EST une période → "nouvelle période" à chaque barre.
+//             Appeler avec `barsToWait = 0` pour comparer la barre courante à la précédente.
+//             (`dayofmonth` ne convient pas ici — constant en Monthly ; on utilise `ta.change(time)`.)
 //
 //           Comparaison à la N-ième barre :
-//           - Bull : running low (cumulé sur N barres) > prevDailyClose → zone [prevClose, runningLow]
-//           - Bear : running high (cumulé sur N barres) < prevDailyClose → zone [runningHigh, prevClose]
+//           - Bull : running low (cumulé sur N+1 barres) > prevPeriodClose → zone [prevClose, runningLow]
+//           - Bear : running high (cumulé sur N+1 barres) < prevPeriodClose → zone [runningHigh, prevClose]
 //
-//           État interne réinitialisé à chaque day-change. Une détection max par journée chart.
-// @param chartTz        TZ d'affichage du chart (déclenche le day-change).
-// @param prevDailyClose Close daily de la veille (à fournir via
-//                       `request.security(sym, "D", close[1], lookahead = barmerge.lookahead_on)`).
-// @param barsToWait     Nb de barres à attendre après le day-change avant d'évaluer (3 = spec).
+//           État interne réinitialisé à chaque début de période. Une détection max par période.
+// @param chartTz         TZ d'affichage du chart (déclenche le day-change en intraday ; ignoré en Daily+).
+// @param prevPeriodClose Close de la période précédente. Intraday : close daily de la veille via
+//                        `request.security(sym, "D", close[1], lookahead = barmerge.lookahead_on)`.
+//                        Daily+ : `close[1]` du chart.
+// @param barsToWait      Nb de barres à attendre après le début de période avant d'évaluer
+//                        (3 en intraday = spec ; 0 en Daily+).
 // @returns Gap si détecté à la N-ième barre, sinon na.
-export detect(simple string chartTz, float prevDailyClose, simple int barsToWait) =>
-    var int   barCount      = 0
-    var float runningLow    = na
-    var float runningHigh   = na
-    var int   dayStart      = na
-    var bool  detectedToday = false
+export detect(simple string chartTz, float prevPeriodClose, simple int barsToWait) =>
+    var int   barCount         = 0
+    var float runningLow       = na
+    var float runningHigh      = na
+    var int   periodBar        = na
+    var bool  detectedThisPeriod = false
 
-    isNewDay = ta.change(dayofmonth(time, chartTz)) != 0
-    if isNewDay
-        barCount      := 0
-        runningLow    := low
-        runningHigh   := high
-        dayStart      := time
-        detectedToday := false
+    isNewPeriod = timeframe.isintraday ? (ta.change(dayofmonth(time, chartTz)) != 0) : (ta.change(time) != 0)
+    if isNewPeriod
+        barCount           := 0
+        runningLow         := low
+        runningHigh        := high
+        // Ancre = bar_index de la barre N (1re de la période = barre qui ouvre le gap). On stocke
+        // l'INDICE de barre (exact), pas un timestamp : le décalage d'affichage (1 barre en arrière
+        // → N-1) est appliqué côté consommateur en xloc.bar_index, insensible aux gaps de session.
+        periodBar          := bar_index
+        detectedThisPeriod := false
     else if not na(runningLow)
         barCount    := barCount + 1
         runningLow  := math.min(runningLow, low)
         runningHigh := math.max(runningHigh, high)
 
     Gap g = na
-    if not detectedToday and barCount == barsToWait and not na(prevDailyClose)
-        if runningLow > prevDailyClose
-            g := Gap.new(dayStart, runningLow, prevDailyClose, GapDirection.BULLISH, false)
-            detectedToday := true
-        else if runningHigh < prevDailyClose
-            g := Gap.new(dayStart, prevDailyClose, runningHigh, GapDirection.BEARISH, false)
-            detectedToday := true
+    if not detectedThisPeriod and barCount == barsToWait and not na(prevPeriodClose)
+        if runningLow > prevPeriodClose
+            g := Gap.new(periodBar, runningLow, prevPeriodClose, GapDirection.BULLISH, false)
+            detectedThisPeriod := true
+        else if runningHigh < prevPeriodClose
+            g := Gap.new(periodBar, prevPeriodClose, runningHigh, GapDirection.BEARISH, false)
+            detectedThisPeriod := true
 
     g
 
@@ -84,15 +94,50 @@ export detect(simple string chartTz, float prevDailyClose, simple int barsToWait
 //           - Total fill   : le prix traverse entièrement → `filled = true`.
 //           No-op si `g` est déjà filled.
 // @param g Gap à mettre à jour.
+//        NB : comblement et rétrécissement sont des `if` SÉPARÉS (pas `else if`) — un `if/else if`
+//        dont une branche retourne `g.filled := true` (bool) et l'autre `g.topPrice := low` (float)
+//        lève CE10235 (types de branches incompatibles).
 export update(Gap g) =>
     if not g.filled
         if g.direction == GapDirection.BULLISH
-            if low <= g.bottomPrice
+            filledNow = low <= g.bottomPrice
+            if filledNow
                 g.filled := true
-            else if low < g.topPrice
+            if (not filledNow) and low < g.topPrice
                 g.topPrice := low
         else
-            if high >= g.topPrice
+            filledNow = high >= g.topPrice
+            if filledNow
                 g.filled := true
-            else if high > g.bottomPrice
+            if (not filledNow) and high > g.bottomPrice
                 g.bottomPrice := high
+
+// ============================================================
+// Orchestrateur
+// ============================================================
+
+// @function Pipeline complet du cycle de vie des gaps sur la TF du chart (mutation in-place de `gaps`) :
+//           détection + push → mise à jour (comblement) de tous les gaps → retrait des gaps comblés
+//           → FIFO sur `maxGaps`. Encapsule la règle TF (`barsToWait = 3` en intraday, `0` en Daily+),
+//           qui est un invariant métier du gap, pas une décision de l'indicateur.
+//           À appeler à CHAQUE barre (détection et comblement sont stateful).
+// @param gaps            Array persistant (`var`) de Gap, muté en place (collection vivante).
+// @param chartTz         TZ d'affichage du chart (day-change intraday ; ignoré en Daily+).
+// @param prevPeriodClose Close de la période précédente (cf. `detect`). Intraday : close daily de la
+//                        veille no-repaint ; Daily+ : `close[1]` du chart.
+// @param maxGaps         Nb max de gaps vivants conservés (borne FIFO).
+export updateGaps(array<Gap> gaps, simple string chartTz, float prevPeriodClose, simple int maxGaps) =>
+    barsToWait = timeframe.isintraday ? 3 : 0
+    g = detect(chartTz, prevPeriodClose, barsToWait)
+    if not na(g)
+        array.push(gaps, g)
+    for gp in gaps
+        update(gp)
+    // Comblement total → suppression (itération descendante, retrait sur place).
+    if array.size(gaps) > 0
+        for i = array.size(gaps) - 1 to 0
+            if array.get(gaps, i).filled
+                array.remove(gaps, i)
+    // FIFO : borne le nombre de gaps vivants.
+    while array.size(gaps) > maxGaps
+        array.shift(gaps)

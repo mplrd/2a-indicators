@@ -1,6 +1,9 @@
 //@version=6
 // @description 2Ai Levels — Niveaux de prix passés (Phase 1 : ATH + niveaux de période précédente PDH/PDL, PWH/PWL, PMH/PML).
-indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+// max_bars_back = 5000 : `draw.drawLevel` reference une barre d'origine dynamique (`x1 = startBar`)
+// jusqu'a 365 barres en arriere. Sans buffer explicite, Pine l'auto-detecte trop court (365) et
+// `line.new` deborde → "requested historical offset beyond buffer limit". 5000 = plafond projet.
+indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, max_bars_back = 5000)
 
 // ============================================================
 // Imports
@@ -11,7 +14,7 @@ import mpilard/lib_supertrend/1 as st
 import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_series/2     as series
 import mpilard/lib_structure/3  as structure
-// gaps : déplacés vers zones-MTF.pine. lib_gap importée là-bas.
+import mpilard/lib_gap/5        as gap
 
 // TZ d'affichage du chart. Pine v6 n'expose pas la TZ d'affichage, donc on la hardcode pour
 // le projet (Europe/Paris). Contrôle "minuit chart" = quand les sessions/OR reset.
@@ -51,11 +54,16 @@ monthlyWidth   = input.int(3,                       "",                  inline 
 // Couleurs Bull/Bear partagées (pattern ST), déclarées AVANT la ligne d'activation pour
 // apparaître au-dessus dans la modal.
 ipaBullColor = input.color(color.blue,            "Bull", inline = "ipa_colors", group = structureGroup)
-ipaBearColor = input.color(color.red,             "Bear", inline = "ipa_colors", group = structureGroup)
+ipaBearColor = input.color(color.orange,          "Bear", inline = "ipa_colors", group = structureGroup)
 
 ipaEnabled   = input.bool(true,                   "IPA", inline = "ipa", group = structureGroup)
-ipaStyle     = input.enum(draw.LineStyle.DASHED,  "",    inline = "ipa", group = structureGroup)
+ipaStyle     = input.enum(draw.LineStyle.DOTTED,  "",    inline = "ipa", group = structureGroup)
 ipaWidth     = input.int(2,                       "",    inline = "ipa", group = structureGroup, minval = 1, maxval = 5)
+
+// Gaps — regroupés ici (à la demande) sur une ligne : activation + couleur + lookback.
+gapsEnabled  = input.bool(true,     "Gaps", inline = "gaps", group = structureGroup)
+gapsColor    = input.color(#CCCCCC, "",     inline = "gaps", group = structureGroup)
+gapsLookback = input.int(50,        "",     inline = "gaps", group = structureGroup, minval = 10, maxval = 500, tooltip = "Historique : nombre de gaps conservés (FIFO).")
 
 // === Supertrend Daily / Weekly ===
 // Couleurs bull/bear partagées entre ST D et ST W ; appliquées dynamiquement selon la direction.
@@ -73,18 +81,18 @@ stWWidth   = input.int(3,                          "",             inline = "st_
 
 // BB Magique flat (length=160, multOuter=2.8) sur H1, H4, D, W (strict < UT cible chacune).
 bbmEnabled = input.bool(true,                      "BB Magique",   inline = "bbm", group = dynGroup)
-bbmStyle   = input.enum(draw.LineStyle.DASHED,     "",             inline = "bbm", group = dynGroup)
-bbmWidth   = input.int(1,                          "",             inline = "bbm", group = dynGroup, minval = 1, maxval = 5)
+bbmStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "bbm", group = dynGroup)
+bbmWidth   = input.int(3,                          "",             inline = "bbm", group = dynGroup, minval = 1, maxval = 5)
 
 // BB Classique flat (length=20, multOuter=2.5) sur H4, D, W (strict < UT cible chacune).
 bbcEnabled = input.bool(true,                      "BB Classique", inline = "bbc", group = dynGroup)
-bbcStyle   = input.enum(draw.LineStyle.DASHED,     "",             inline = "bbc", group = dynGroup)
-bbcWidth   = input.int(1,                          "",             inline = "bbc", group = dynGroup, minval = 1, maxval = 5)
+bbcStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "bbc", group = dynGroup)
+bbcWidth   = input.int(2,                          "",             inline = "bbc", group = dynGroup, minval = 1, maxval = 5)
 
 // MA 50 et MA 200 sur D et W (toujours affichées, pas de condition flat).
 ma50Enabled  = input.bool(true,                      "MA 50",  inline = "ma50",  group = dynGroup)
 ma50Style    = input.enum(draw.LineStyle.SOLID,      "",       inline = "ma50",  group = dynGroup)
-ma50Width    = input.int(1,                          "",       inline = "ma50",  group = dynGroup, minval = 1, maxval = 5)
+ma50Width    = input.int(2,                          "",       inline = "ma50",  group = dynGroup, minval = 1, maxval = 5)
 
 ma200Enabled = input.bool(true,                      "MA 200", inline = "ma200", group = dynGroup)
 ma200Style   = input.enum(draw.LineStyle.SOLID,      "",       inline = "ma200", group = dynGroup)
@@ -97,12 +105,12 @@ asianColor   = input.color(color.orange,             "",                   inlin
 asianStyle   = input.enum(draw.LineStyle.DASHED,     "",                   inline = "asian_session",  group = intradayGroup)
 asianWidth   = input.int(2,                          "",                   inline = "asian_session",  group = intradayGroup, minval = 1, maxval = 5)
 
-euEnabled = input.bool(false,                        "Session Européenne", inline = "eu_session",     group = intradayGroup)
+euEnabled = input.bool(true,                         "Session Européenne", inline = "eu_session",     group = intradayGroup)
 euColor   = input.color(color.blue,                  "",                   inline = "eu_session",     group = intradayGroup)
 euStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "eu_session",     group = intradayGroup)
 euWidth   = input.int(2,                             "",                   inline = "eu_session",     group = intradayGroup, minval = 1, maxval = 5)
 
-usEnabled = input.bool(false,                        "Session Américaine", inline = "us_session",     group = intradayGroup)
+usEnabled = input.bool(true,                         "Session Américaine", inline = "us_session",     group = intradayGroup)
 usColor   = input.color(color.purple,                "",                   inline = "us_session",     group = intradayGroup)
 usStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "us_session",     group = intradayGroup)
 usWidth   = input.int(2,                             "",                   inline = "us_session",     group = intradayGroup, minval = 1, maxval = 5)
@@ -110,20 +118,20 @@ usWidth   = input.int(2,                             "",                   inlin
 // Open Range + Opens
 orEnabled = input.bool(true,                         "Open Range",         inline = "or_level",       group = intradayGroup)
 orColor   = input.color(#000000,                     "",                   inline = "or_level",       group = intradayGroup)
-orStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "or_level",       group = intradayGroup)
-orWidth   = input.int(1,                             "",                   inline = "or_level",       group = intradayGroup, minval = 1, maxval = 5)
+orStyle   = input.enum(draw.LineStyle.DOTTED,        "",                   inline = "or_level",       group = intradayGroup)
+orWidth   = input.int(2,                             "",                   inline = "or_level",       group = intradayGroup, minval = 1, maxval = 5)
 
-openFutureEnabled = input.bool(true,                  "Open Future",        inline = "open_future",    group = intradayGroup)
+openFutureEnabled = input.bool(false,                 "Open Future",        inline = "open_future",    group = intradayGroup)
 openFutureColor   = input.color(#555555,              "",                   inline = "open_future",    group = intradayGroup)
 openFutureStyle   = input.enum(draw.LineStyle.DOTTED, "",                   inline = "open_future",    group = intradayGroup)
 openFutureWidth   = input.int(1,                      "",                   inline = "open_future",    group = intradayGroup, minval = 1, maxval = 5)
 
-openEUEnabled = input.bool(true,                      "Open EU",            inline = "open_eu",        group = intradayGroup)
+openEUEnabled = input.bool(false,                     "Open EU",            inline = "open_eu",        group = intradayGroup)
 openEUColor   = input.color(color.blue,               "",                   inline = "open_eu",        group = intradayGroup)
 openEUStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_eu",        group = intradayGroup)
 openEUWidth   = input.int(1,                          "",                   inline = "open_eu",        group = intradayGroup, minval = 1, maxval = 5)
 
-openUSEnabled = input.bool(true,                      "Open US",            inline = "open_us",        group = intradayGroup)
+openUSEnabled = input.bool(false,                     "Open US",            inline = "open_us",        group = intradayGroup)
 openUSColor   = input.color(color.purple,             "",                   inline = "open_us",        group = intradayGroup)
 openUSStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_us",        group = intradayGroup)
 openUSWidth   = input.int(1,                          "",                   inline = "open_us",        group = intradayGroup, minval = 1, maxval = 5)
@@ -186,6 +194,15 @@ pwStartBar = levels.previousPeriodStartBar("W")
 pmStartBar = levels.previousPeriodStartBar("M")
 
 [athValue, athBar, athBarFound] = levels.ath()
+
+// Gaps — close de la periode precedente (donnee d'entree, cote indicateur car request.security) ;
+// tout le pipeline (detection + cycle de vie + FIFO + regle TF) est delegue a lib_gap.
+// Intraday : close daily de la veille no-repaint. Daily+ : `close[1]` du chart.
+dPrevClose      = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_on)
+prevPeriodClose = timeframe.isintraday ? dPrevClose : close[1]
+var array<gap.Gap> gapArr = array.new<gap.Gap>()
+if gapsEnabled
+    gap.updateGaps(gapArr, chartTz, prevPeriodClose, gapsLookback)
 
 // Supertrend Daily / Weekly. ATR/Factor hardcodés (10, 3.0). Direction colore la ligne (bull/bear).
 // `isHigh` du label reste hardcoded `false` (Pine n'autorise pas `simple bool` dérivé de `series`).
@@ -250,6 +267,7 @@ structure.updateIPAs(ipas, ipaPivotN, ipaMaxN)
 // ============================================================
 var array<line>  lineArr  = array.new<line>()
 var array<label> labelArr = array.new<label>()
+var array<box>   boxArr   = array.new<box>()
 
 // `drawDynamicLevel` est désormais dans `lib_draw` (v15) — primitive de rendu, pas spécifique
 // à cet indicateur. On l'invoque directement via `draw.drawDynamicLevel(...)`.
@@ -262,6 +280,22 @@ if barstate.islast
     for lb in labelArr
         label.delete(lb)
     array.clear(labelArr)
+    for bx in boxArr
+        box.delete(bx)
+    array.clear(boxArr)
+
+    // Gaps — box top↔bottom ancree en xloc.bar_index (exact, insensible aux gaps de session, contrairement
+    // a bar_time). g.startBar = barre qui OUVRE le gap (N) ; on decale l'affichage d'1 barre en arriere
+    // (`- 1` → N-1 = derniere bougie avant le gap). Si l'ancre est encore d'un cran a ajuster, c'est ce
+    // `- 1` qu'on modifie (aucun republish de lib). Sans bordure (border_color = na), fond gris clair
+    // translucide. Gaps combles non rendus (deja retires de gapArr).
+    if gapsEnabled
+        for g in gapArr
+            leftBar = math.max(g.startBar - 1, 0)
+            bx = box.new(left = leftBar, top = g.topPrice, right = bar_index, bottom = g.bottomPrice,
+              xloc = xloc.bar_index, border_color = na, bgcolor = color.new(gapsColor, 85),
+              extend = extend.right, force_overlay = true)
+            array.push(boxArr, bx)
 
     // ATH (toujours TF-allowed)
     draw.drawLevel(athEnabled, athValue, athBar, athBarFound, athColor, athWidth, athStyle, "ATH", showLabels, true, lineArr, labelArr)
