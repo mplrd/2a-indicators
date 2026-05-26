@@ -14,7 +14,7 @@ import mpilard/lib_supertrend/1 as st
 import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_series/2     as series
 import mpilard/lib_structure/3  as structure
-import mpilard/lib_gap/5        as gap
+import mpilard/lib_gap/6        as gap
 
 // TZ d'affichage du chart. Pine v6 n'expose pas la TZ d'affichage, donc on la hardcode pour
 // le projet (Europe/Paris). Contrôle "minuit chart" = quand les sessions/OR reset.
@@ -195,14 +195,51 @@ pmStartBar = levels.previousPeriodStartBar("M")
 
 [athValue, athBar, athBarFound] = levels.ath()
 
-// Gaps — close de la periode precedente (donnee d'entree, cote indicateur car request.security) ;
-// tout le pipeline (detection + cycle de vie + FIFO + regle TF) est delegue a lib_gap.
-// Intraday : close daily de la veille no-repaint. Daily+ : `close[1]` du chart.
-dPrevClose      = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_on)
-prevPeriodClose = timeframe.isintraday ? dPrevClose : close[1]
-var array<gap.Gap> gapArr = array.new<gap.Gap>()
-if gapsEnabled
-    gap.updateGaps(gapArr, chartTz, prevPeriodClose, gapsLookback)
+// Gaps journaliers — detection sur la barre DAILY (low/high vs close veille) via request.security,
+// affichee sur tout TF. La box est creee UNE fois au changement de jour chart (left = bar_index - 1 =
+// barre avant le gap, adjacente → pas d'erreur de distance bar_index), puis MUTEE sur place
+// (set_top/set_bottom) ou supprimee au comblement. Logique portee de l'ancien indicateur (validee,
+// pas de faux gap sur instruments 24h). Le metier vit dans lib_gap ; le cycle de vie de la box
+// (graphique) reste cote indicateur (les libs ne dessinent pas). gere chaque barre (pas dans islast).
+[dGapHas, dGapTop, dGapBottom, dGapDir] = request.security(syminfo.tickerid, "D", gap.detectDaily(), lookahead = barmerge.lookahead_on)
+
+var array<box>   gapBoxes   = array.new<box>()
+var array<float> gapTops    = array.new<float>()
+var array<float> gapBottoms = array.new<float>()
+var array<int>   gapDirs    = array.new<int>()
+
+// Nouveau gap au changement de jour : creation de la box (une seule fois) + FIFO sur le lookback.
+if gapsEnabled and timeframe.change("D") and dGapHas
+    gb = box.new(bar_index - 1, dGapTop, bar_index, dGapBottom, xloc = xloc.bar_index,
+      border_color = na, bgcolor = color.new(gapsColor, 85), extend = extend.right, force_overlay = true)
+    array.push(gapBoxes, gb)
+    array.push(gapTops, dGapTop)
+    array.push(gapBottoms, dGapBottom)
+    array.push(gapDirs, dGapDir)
+    if array.size(gapBoxes) > gapsLookback
+        box.delete(array.shift(gapBoxes))
+        array.shift(gapTops)
+        array.shift(gapBottoms)
+        array.shift(gapDirs)
+
+// Comblement (chaque barre) : retrecit la box (partiel) ou la supprime (total).
+if array.size(gapBoxes) > 0
+    for i = array.size(gapBoxes) - 1 to 0
+        [gFilled, gPartial, gNewTop, gNewBottom] = gap.checkFill(array.get(gapTops, i), array.get(gapBottoms, i), array.get(gapDirs, i))
+        if gFilled
+            box.delete(array.get(gapBoxes, i))
+            array.remove(gapBoxes, i)
+            array.remove(gapTops, i)
+            array.remove(gapBottoms, i)
+            array.remove(gapDirs, i)
+        else if gPartial
+            cb = array.get(gapBoxes, i)
+            if array.get(gapDirs, i) == 1 and gNewTop < array.get(gapTops, i)
+                box.set_top(cb, gNewTop)
+                array.set(gapTops, i, gNewTop)
+            else if array.get(gapDirs, i) == -1 and gNewBottom > array.get(gapBottoms, i)
+                box.set_bottom(cb, gNewBottom)
+                array.set(gapBottoms, i, gNewBottom)
 
 // Supertrend Daily / Weekly. ATR/Factor hardcodés (10, 3.0). Direction colore la ligne (bull/bear).
 // `isHigh` du label reste hardcoded `false` (Pine n'autorise pas `simple bool` dérivé de `series`).
@@ -215,8 +252,14 @@ stWActiveColor = stWDir > 0 ? stBullColor : stBearColor
 // OU en fermeture (= même critère que la coloration accent dans layout, bande non-expansive).
 bbmHtfLevels(simple int flatLen, simple float flatThr) =>
     [_b, _iU, _iL, oU, oL] = bb.bands(close, 160, 2.5, 2.8)
-    drawU = series.isFlatSeries(oU, flatLen, flatThr) or series.isClosingSeries(oU, flatLen, flatThr, true)
-    drawL = series.isFlatSeries(oL, flatLen, flatThr) or series.isClosingSeries(oL, flatLen, flatThr, false)
+    // Appels hoistés hors du `or` (sinon `isClosingSeries` court-circuité → CW10002 : doit s'exécuter
+    // chaque barre car dépendant de l'historique).
+    flatU    = series.isFlatSeries(oU, flatLen, flatThr)
+    closingU = series.isClosingSeries(oU, flatLen, flatThr, true)
+    flatL    = series.isFlatSeries(oL, flatLen, flatThr)
+    closingL = series.isClosingSeries(oL, flatLen, flatThr, false)
+    drawU = flatU or closingU
+    drawL = flatL or closingL
     [oU, oL, drawU, drawL]
 
 [bbmH1U, bbmH1L, bbmH1UDraw, bbmH1LDraw] = request.security(syminfo.tickerid, "60",  bbmHtfLevels(flatPeriod, flatThreshold))
@@ -227,8 +270,12 @@ bbmHtfLevels(simple int flatLen, simple float flatThr) =>
 // BB Classique (length=20, multOuter=2.5) sur H4/D/W. Critère identique : flat OR closing.
 bbcHtfLevels(simple int flatLen, simple float flatThr) =>
     [_b, _iU, _iL, oU, oL] = bb.bands(close, 20, 2.0, 2.5)
-    drawU = series.isFlatSeries(oU, flatLen, flatThr) or series.isClosingSeries(oU, flatLen, flatThr, true)
-    drawL = series.isFlatSeries(oL, flatLen, flatThr) or series.isClosingSeries(oL, flatLen, flatThr, false)
+    flatU    = series.isFlatSeries(oU, flatLen, flatThr)
+    closingU = series.isClosingSeries(oU, flatLen, flatThr, true)
+    flatL    = series.isFlatSeries(oL, flatLen, flatThr)
+    closingL = series.isClosingSeries(oL, flatLen, flatThr, false)
+    drawU = flatU or closingU
+    drawL = flatL or closingL
     [oU, oL, drawU, drawL]
 
 [bbcH4U, bbcH4L, bbcH4UDraw, bbcH4LDraw] = request.security(syminfo.tickerid, "240", bbcHtfLevels(flatPeriod, flatThreshold))
@@ -267,7 +314,6 @@ structure.updateIPAs(ipas, ipaPivotN, ipaMaxN)
 // ============================================================
 var array<line>  lineArr  = array.new<line>()
 var array<label> labelArr = array.new<label>()
-var array<box>   boxArr   = array.new<box>()
 
 // `drawDynamicLevel` est désormais dans `lib_draw` (v15) — primitive de rendu, pas spécifique
 // à cet indicateur. On l'invoque directement via `draw.drawDynamicLevel(...)`.
@@ -280,22 +326,6 @@ if barstate.islast
     for lb in labelArr
         label.delete(lb)
     array.clear(labelArr)
-    for bx in boxArr
-        box.delete(bx)
-    array.clear(boxArr)
-
-    // Gaps — box top↔bottom ancree en xloc.bar_index (exact, insensible aux gaps de session, contrairement
-    // a bar_time). g.startBar = barre qui OUVRE le gap (N) ; on decale l'affichage d'1 barre en arriere
-    // (`- 1` → N-1 = derniere bougie avant le gap). Si l'ancre est encore d'un cran a ajuster, c'est ce
-    // `- 1` qu'on modifie (aucun republish de lib). Sans bordure (border_color = na), fond gris clair
-    // translucide. Gaps combles non rendus (deja retires de gapArr).
-    if gapsEnabled
-        for g in gapArr
-            leftBar = math.max(g.startBar - 1, 0)
-            bx = box.new(left = leftBar, top = g.topPrice, right = bar_index, bottom = g.bottomPrice,
-              xloc = xloc.bar_index, border_color = na, bgcolor = color.new(gapsColor, 85),
-              extend = extend.right, force_overlay = true)
-            array.push(boxArr, bx)
 
     // ATH (toujours TF-allowed)
     draw.drawLevel(athEnabled, athValue, athBar, athBarFound, athColor, athWidth, athStyle, "ATH", showLabels, true, lineArr, labelArr)

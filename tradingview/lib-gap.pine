@@ -1,143 +1,70 @@
 //@version=6
-// @description lib-gap — détection de gaps daily + cycle de vie (comblement partiel/total). Couche 1.
-//              Pas de dessin (le consommateur gère la collection et le rendu).
+// @description lib-gap — détection de gaps journaliers + statut de comblement. Couche 1. Pas de dessin.
+//              Porté de l'ancien indicateur (logique validée). La détection s'exécute sur la barre
+//              DAILY (`low`/`high` vs clôture précédente) ; le consommateur l'appelle via
+//              `request.security(ticker, "D", detectDaily())` pour afficher les gaps daily sur
+//              n'importe quel timeframe, et crée/met à jour la box lui-même (les libs ne dessinent pas).
 library("lib_gap", overlay = true)
 
 // ============================================================
-// Types
+// Détection (contexte daily, via request.security(ticker, "D", ...))
 // ============================================================
 
-// @enum GapDirection — sens du gap.
-export enum GapDirection
-    BULLISH
-    BEARISH
-
-// @type Gap — gap daily avec état de comblement.
-//        - startBar   : bar_index de la barre qui OUVRE le gap (1re barre de la période = N). Le
-//                       consommateur décale l'affichage d'1 barre en arrière (N-1) en xloc.bar_index.
-//        - topPrice   : bord supérieur (descend en partial fill bull)
-//        - bottomPrice: bord inférieur (monte en partial fill bear)
-//        - direction  : BULLISH ou BEARISH
-//        - filled     : true quand totalement comblé (le consommateur peut filtrer au rendu)
-export type Gap
-    int          startBar
-    float        topPrice
-    float        bottomPrice
-    GapDirection direction
-    bool         filled
-
-// ============================================================
-// Détection
-// ============================================================
-
-// @function Détecte un gap à la N-ième barre après le début de période. TF-aware :
-//           - Chart intraday : la "période" est la journée chart (day-change via `chartTz`).
-//             `barsToWait` (3 = spec) laisse passer les premières bougies pour éviter les faux
-//             gaps cash structurels (sur cash, la 1re barre du jour est toujours décalée vs
-//             cloture veille — ce n'est pas un "vrai" gap de prix).
-//           - Chart Daily+ : chaque barre EST une période → "nouvelle période" à chaque barre.
-//             Appeler avec `barsToWait = 0` pour comparer la barre courante à la précédente.
-//             (`dayofmonth` ne convient pas ici — constant en Monthly ; on utilise `ta.change(time)`.)
-//
-//           Comparaison à la N-ième barre :
-//           - Bull : running low (cumulé sur N+1 barres) > prevPeriodClose → zone [prevClose, runningLow]
-//           - Bear : running high (cumulé sur N+1 barres) < prevPeriodClose → zone [runningHigh, prevClose]
-//
-//           État interne réinitialisé à chaque début de période. Une détection max par période.
-// @param chartTz         TZ d'affichage du chart (déclenche le day-change en intraday ; ignoré en Daily+).
-// @param prevPeriodClose Close de la période précédente. Intraday : close daily de la veille via
-//                        `request.security(sym, "D", close[1], lookahead = barmerge.lookahead_on)`.
-//                        Daily+ : `close[1]` du chart.
-// @param barsToWait      Nb de barres à attendre après le début de période avant d'évaluer
-//                        (3 en intraday = spec ; 0 en Daily+).
-// @returns Gap si détecté à la N-ième barre, sinon na.
-export detect(simple string chartTz, float prevPeriodClose, simple int barsToWait) =>
-    var int   barCount         = 0
-    var float runningLow       = na
-    var float runningHigh      = na
-    var int   periodBar        = na
-    var bool  detectedThisPeriod = false
-
-    isNewPeriod = timeframe.isintraday ? (ta.change(dayofmonth(time, chartTz)) != 0) : (ta.change(time) != 0)
-    if isNewPeriod
-        barCount           := 0
-        runningLow         := low
-        runningHigh        := high
-        // Ancre = bar_index de la barre N (1re de la période = barre qui ouvre le gap). On stocke
-        // l'INDICE de barre (exact), pas un timestamp : le décalage d'affichage (1 barre en arrière
-        // → N-1) est appliqué côté consommateur en xloc.bar_index, insensible aux gaps de session.
-        periodBar          := bar_index
-        detectedThisPeriod := false
-    else if not na(runningLow)
-        barCount    := barCount + 1
-        runningLow  := math.min(runningLow, low)
-        runningHigh := math.max(runningHigh, high)
-
-    Gap g = na
-    if not detectedThisPeriod and barCount == barsToWait and not na(prevPeriodClose)
-        if runningLow > prevPeriodClose
-            g := Gap.new(periodBar, runningLow, prevPeriodClose, GapDirection.BULLISH, false)
-            detectedThisPeriod := true
-        else if runningHigh < prevPeriodClose
-            g := Gap.new(periodBar, prevPeriodClose, runningHigh, GapDirection.BEARISH, false)
-            detectedThisPeriod := true
-
-    g
+// @function Détecte un gap journalier sur la barre daily courante.
+//           - Haussier : `low > close[1]`  → zone [close[1], low], direction `1`.
+//           - Baissier : `high < close[1]` → zone [high, close[1]], direction `-1`.
+//           Ne détecte qu'en `timeframe.isdaily` (sinon aucun gap). La mèche de la barre daily inclut
+//           TOUT le trading du jour, donc `low > close[1]` traduit un vrai gap non comblé — pas de
+//           faux gap sur les instruments 24h (le mouvement nocturne est dans la barre daily, pas un gap),
+//           contrairement à une détection au minuit-chart.
+// @returns [hasGap (bool), top (float), bottom (float), direction (int : 1 haussier / -1 baissier / 0 aucun)]
+export detectDaily() =>
+    bool  hasGap = false
+    float top    = na
+    float bottom = na
+    int   dir    = 0
+    if timeframe.isdaily
+        if low > close[1]
+            hasGap := true
+            top    := low
+            bottom := close[1]
+            dir    := 1
+        else if high < close[1]
+            hasGap := true
+            top    := close[1]
+            bottom := high
+            dir    := -1
+    [hasGap, top, bottom, dir]
 
 // ============================================================
-// Cycle de vie
+// Comblement (contexte du chart)
 // ============================================================
 
-// @function Met à jour le cycle de vie d'un gap avec le bar courant (mutation in-place).
-//           - Partial fill : le prix entre dans la zone sans la traverser → rétrécit
-//             (top descend pour un bull gap, bottom monte pour un bear gap).
-//           - Total fill   : le prix traverse entièrement → `filled = true`.
-//           No-op si `g` est déjà filled.
-// @param g Gap à mettre à jour.
-//        NB : comblement et rétrécissement sont des `if` SÉPARÉS (pas `else if`) — un `if/else if`
-//        dont une branche retourne `g.filled := true` (bool) et l'autre `g.topPrice := low` (float)
-//        lève CE10235 (types de branches incompatibles).
-export update(Gap g) =>
-    if not g.filled
-        if g.direction == GapDirection.BULLISH
-            filledNow = low <= g.bottomPrice
-            if filledNow
-                g.filled := true
-            if (not filledNow) and low < g.topPrice
-                g.topPrice := low
-        else
-            filledNow = high >= g.topPrice
-            if filledNow
-                g.filled := true
-            if (not filledNow) and high > g.bottomPrice
-                g.bottomPrice := high
-
-// ============================================================
-// Orchestrateur
-// ============================================================
-
-// @function Pipeline complet du cycle de vie des gaps sur la TF du chart (mutation in-place de `gaps`) :
-//           détection + push → mise à jour (comblement) de tous les gaps → retrait des gaps comblés
-//           → FIFO sur `maxGaps`. Encapsule la règle TF (`barsToWait = 3` en intraday, `0` en Daily+),
-//           qui est un invariant métier du gap, pas une décision de l'indicateur.
-//           À appeler à CHAQUE barre (détection et comblement sont stateful).
-// @param gaps            Array persistant (`var`) de Gap, muté en place (collection vivante).
-// @param chartTz         TZ d'affichage du chart (day-change intraday ; ignoré en Daily+).
-// @param prevPeriodClose Close de la période précédente (cf. `detect`). Intraday : close daily de la
-//                        veille no-repaint ; Daily+ : `close[1]` du chart.
-// @param maxGaps         Nb max de gaps vivants conservés (borne FIFO).
-export updateGaps(array<Gap> gaps, simple string chartTz, float prevPeriodClose, simple int maxGaps) =>
-    barsToWait = timeframe.isintraday ? 3 : 0
-    g = detect(chartTz, prevPeriodClose, barsToWait)
-    if not na(g)
-        array.push(gaps, g)
-    for gp in gaps
-        update(gp)
-    // Comblement total → suppression (itération descendante, retrait sur place).
-    if array.size(gaps) > 0
-        for i = array.size(gaps) - 1 to 0
-            if array.get(gaps, i).filled
-                array.remove(gaps, i)
-    // FIFO : borne le nombre de gaps vivants.
-    while array.size(gaps) > maxGaps
-        array.shift(gaps)
+// @function Statut de comblement d'un gap avec la barre courante (timeframe du chart).
+//           - Haussier (`dir = 1`) : comblement partiel si le prix entre dans la zone
+//             (`low <= top and low > bottom`) → `newTop = low` ; total si `low <= bottom`.
+//           - Baissier (`dir = -1`) : partiel si `high >= bottom and high < top` → `newBottom = high` ;
+//             total si `high >= top`.
+//           Le consommateur applique `box.set_top`/`set_bottom` (partiel) ou `box.delete` (total).
+// @param top        Bord supérieur courant du gap.
+// @param bottom     Bord inférieur courant du gap.
+// @param direction  `1` (haussier) ou `-1` (baissier).
+// @returns [isFilled (bool), isPartial (bool), newTop (float), newBottom (float)]
+export checkFill(float top, float bottom, int direction) =>
+    bool  isFilled  = false
+    bool  isPartial = false
+    float newTop    = top
+    float newBottom = bottom
+    if direction == 1
+        if low <= top and low > bottom
+            isPartial := true
+            newTop    := low
+        if low <= bottom
+            isFilled := true
+    else if direction == -1
+        if high >= bottom and high < top
+            isPartial := true
+            newBottom := high
+        if high >= top
+            isFilled := true
+    [isFilled, isPartial, newTop, newBottom]
