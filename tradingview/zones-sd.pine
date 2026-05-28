@@ -1,0 +1,118 @@
+//@version=6
+// @description 2Ai Zones — Indicateur des zones d'intérêt sur l'UT courante.
+//              - Supply/Demand via CMI (sans validation 3 bougies).
+//              - Fair Value Gaps (FVG) avec partial/total fill et filtre anti-faux-gap temporel.
+//              - Zones 5★ : naturellement visibles dès qu'un S/D et un FVG se superposent (même side).
+//              - Safe mode : filtre au rendu qui ne garde que les zones 5★.
+//              Toute la logique métier (lifecycle, anti-chaînage, anti-chevauchement, detect/update,
+//              cleanup) vit dans `lib_sd` et `lib_fvg`. Cet indicateur n'orchestre que les inputs,
+//              l'appel des `updateZones` et le rendu.
+//              Cf. SPECIFICATIONS.md § Indicateur 4.
+indicator("2Ai Zones", shorttitle = "Zones S/D", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_signal/2 as signal
+import mpilard/lib_zone/1   as zone
+import mpilard/lib_sd/1     as sd
+import mpilard/lib_fvg/3    as fvg
+import mpilard/lib_draw/15  as draw
+
+// ============================================================
+// Inputs
+// ============================================================
+
+var sdGroup  = "Supply / Demand"
+var fvgGroup = "Fair Value Gaps"
+
+// --- Supply / Demand --- (4 items distincts, chacun son quadruplet [Enabled][Couleur][Bordure][Épaisseur])
+demandEnabled     = input.bool(true,                  "Demand", inline = "demand", group = sdGroup)
+demandColor       = input.color(color.blue,           "",       inline = "demand", group = sdGroup)
+demandBorderStyle = input.enum(draw.LineStyle.SOLID,  "",       inline = "demand", group = sdGroup)
+demandBorderWidth = input.int(1,                      "",       inline = "demand", group = sdGroup, minval = 0, maxval = 4)
+
+supplyEnabled     = input.bool(true,                  "Supply", inline = "supply", group = sdGroup)
+supplyColor       = input.color(color.orange,         "",       inline = "supply", group = sdGroup)
+supplyBorderStyle = input.enum(draw.LineStyle.SOLID,  "",       inline = "supply", group = sdGroup)
+supplyBorderWidth = input.int(1,                      "",       inline = "supply", group = sdGroup, minval = 0, maxval = 4)
+
+// --- Fair Value Gaps ---
+fvgBullEnabled     = input.bool(true,                   "FVG Bullish", inline = "fvgbull", group = fvgGroup)
+fvgBullColor       = input.color(color.green,           "",            inline = "fvgbull", group = fvgGroup)
+fvgBullBorderStyle = input.enum(draw.LineStyle.DASHED,  "",            inline = "fvgbull", group = fvgGroup)
+fvgBullBorderWidth = input.int(0,                       "",            inline = "fvgbull", group = fvgGroup, minval = 0, maxval = 4)
+
+fvgBearEnabled     = input.bool(true,                   "FVG Bearish", inline = "fvgbear", group = fvgGroup)
+fvgBearColor       = input.color(color.red,             "",            inline = "fvgbear", group = fvgGroup)
+fvgBearBorderStyle = input.enum(draw.LineStyle.DASHED,  "",            inline = "fvgbear", group = fvgGroup)
+fvgBearBorderWidth = input.int(0,                       "",            inline = "fvgbear", group = fvgGroup, minval = 0, maxval = 4)
+
+// === Paramètres globaux === (déclaré en dernier → affiché tout en bas de la modal TV)
+var globalsGroup = "Paramètres globaux"
+// Safe mode : si activé, n'affiche que les zones 5★ = S/D + FVG alignés en prix sur le même side.
+safeMode = input.bool(false, "Safe mode (5★ uniquement)", group = globalsGroup)
+
+// ============================================================
+// Orchestration : mise à jour des collections via les libs
+// ============================================================
+
+// Cap mémoire FIFO (cohérent avec max_boxes_count=500 par défaut Pine).
+MAX_ZONES = 100
+
+// Collections persistantes.
+var array<zone.Zone> sdZones  = array.new<zone.Zone>()
+var array<zone.Zone> fvgZones = array.new<zone.Zone>()
+
+// Update S/D : signal CMI + lifecycle/anti-chaînage/anti-chevauchement/cleanup (tout dans lib_sd).
+sd.updateZones(sdZones, signal.detectCMI(), MAX_ZONES)
+
+// Update FVG : detect + lifecycle/cleanup (tout dans lib_fvg).
+fvg.updateZones(fvgZones, MAX_ZONES)
+
+// ============================================================
+// Rendu — refresh à chaque tick sur la dernière barre
+// ============================================================
+var array<box>   boxArr   = array.new<box>()
+var array<label> labelArr = array.new<label>()
+
+// Helper local : vrai s'il existe dans `arr` une zone active de MÊME side qui chevauche `z` en prix.
+// Sert au filtre Safe mode (zone 5★ = S/D + FVG alignés).
+hasOverlappingActiveSameSide(array<zone.Zone> arr, zone.Zone z) =>
+    found = false
+    n = array.size(arr)
+    if n > 0
+        for i = 0 to n - 1
+            other = array.get(arr, i)
+            if zone.isActive(other) and other.side == z.side and zone.overlap(other, z)
+                found := true
+                break
+    found
+
+if barstate.islast
+    // Nettoyage des objets précédents.
+    for bx in boxArr
+        box.delete(bx)
+    array.clear(boxArr)
+    for lb in labelArr
+        label.delete(lb)
+    array.clear(labelArr)
+
+    // Rendu des zones S/D actives (transparence 85% fond / 40% bordure cf. spec).
+    // CMI bull → Demand (support potentiel) ; CMI bear → Supply (résistance potentielle).
+    // Safe mode : on ne dessine que si la zone a un FVG aligné (même side, chevauchement prix).
+    // Réglages par side : Demand et Supply ont chacun leur enabled / couleur / bordure / épaisseur.
+    // drawZone attend des params `simple` (width, style) → 2 appels mutuellement exclusifs par side
+    // (pattern levels.pine IPA), pas de ternaire `series`.
+    for z in sdZones
+        isBull   = z.side == zone.ZoneSide.BULL
+        keepBase = (not safeMode) or hasOverlappingActiveSameSide(fvgZones, z)
+        draw.drawZone(demandEnabled and isBull       and keepBase, z, demandColor, demandBorderWidth, demandBorderStyle, 85, 40, false, "", boxArr, labelArr)
+        draw.drawZone(supplyEnabled and (not isBull) and keepBase, z, supplyColor, supplyBorderWidth, supplyBorderStyle, 85, 40, false, "", boxArr, labelArr)
+
+    // Rendu des FVG actifs. Réglages par side (Bullish / Bearish). Safe mode : seulement si un S/D aligné existe.
+    for z in fvgZones
+        isBull   = z.side == zone.ZoneSide.BULL
+        keepBase = (not safeMode) or hasOverlappingActiveSameSide(sdZones, z)
+        draw.drawZone(fvgBullEnabled and isBull       and keepBase, z, fvgBullColor, fvgBullBorderWidth, fvgBullBorderStyle, 85, 40, false, "", boxArr, labelArr)
+        draw.drawZone(fvgBearEnabled and (not isBull) and keepBase, z, fvgBearColor, fvgBearBorderWidth, fvgBearBorderStyle, 85, 40, false, "", boxArr, labelArr)

@@ -16,15 +16,20 @@ import mpilard/lib_draw/15    as draw
 // ============================================================
 // Inputs
 // ============================================================
-var grp       = "CMI Zones"
-lookbackBars  = input.int(3,        "Drawing CMI Zone Lookback", minval = 1, maxval = 5, group = grp)
-intraModeStr  = input.string("Pending", "Mode chevauchement intra-TF", options = ["Pending", "Replacement"], group = grp, tooltip = "Pending : zone en attente si chevauchement (reactivee quand le blocker expire). Replacement : l'ancienne zone expire, la nouvelle prend sa place.")
-pendingMode   = intraModeStr == "Pending"
-maxZones      = input.int(100,      "Max zones (FIFO)", minval = 1, maxval = 500, group = grp)
+var grp = "Zones CMI"
 
-zoneColor     = input.color(color.teal,           "Couleur",   inline = "z", group = grp)
-bordStyle     = input.enum(draw.LineStyle.SOLID,  "Bordure",   inline = "z", group = grp)
-bordWidth     = input.int(1,                      "Epaisseur", inline = "z", group = grp, minval = 0, maxval = 4)
+// Triplet inline [Enabled] [Couleur] [Bordure] [Épaisseur] (pattern levels.pine).
+cmiEnabled = input.bool(true,                    "Zones",     inline = "z", group = grp)
+zoneColor  = input.color(color.teal,             "",          inline = "z", group = grp)
+bordStyle  = input.enum(draw.LineStyle.SOLID,    "",          inline = "z", group = grp)
+bordWidth  = input.int(1,                        "",          inline = "z", group = grp, minval = 0, maxval = 4)
+
+// === Paramètres globaux === (déclaré en dernier → affiché tout en bas de la modal TV)
+var globalsGroup = "Paramètres globaux"
+lookbackBars = input.int(3,         "Drawing CMI Zone Lookback",  group = globalsGroup, minval = 1, maxval = 5)
+intraModeStr = input.string("Pending", "Mode chevauchement intra-TF", options = ["Pending", "Replacement"], group = globalsGroup, tooltip = "Pending : zone en attente si chevauchement (reactivee quand le blocker expire). Replacement : l'ancienne zone expire, la nouvelle prend sa place.")
+pendingMode  = intraModeStr == "Pending"
+maxZones     = input.int(100,       "Max zones (FIFO)",           group = globalsGroup, minval = 1, maxval = 500)
 
 // ============================================================
 // State machine sur l'UT du chart
@@ -47,18 +52,20 @@ cmiZone.intraOverlapPass(zones, pendingMode)
 var array<box> boxArr = array.new<box>()
 
 if barstate.islast
+    // Nettoyage systématique (même si cmiEnabled=false, pour effacer les boxes du tick précédent).
     for bx in boxArr
         box.delete(bx)
     array.clear(boxArr)
-    oneBarMs = timeframe.in_seconds() * 1000
-    for cz in zones
-        if cz.state == cmiZone.CmiState.ACTIVE
-            bx = box.new(left = cz.leftTime, top = cz.top, right = time + oneBarMs * 5, bottom = cz.bottom,
-              xloc         = xloc.bar_time,
-              border_color = color.new(zoneColor, 40),
-              bgcolor      = color.new(zoneColor, 85),
-              border_width = bordWidth,
-              border_style = bordStyle == draw.LineStyle.DASHED ? line.style_dashed : bordStyle == draw.LineStyle.DOTTED ? line.style_dotted : line.style_solid,
-              extend       = extend.right,
-              force_overlay = true)
-            array.push(boxArr, bx)
+    if cmiEnabled
+        oneBarMs = timeframe.in_seconds() * 1000
+        for cz in zones
+            if cz.state == cmiZone.CmiState.ACTIVE
+                bx = box.new(left = cz.leftTime, top = cz.top, right = time + oneBarMs * 5, bottom = cz.bottom,
+                  xloc         = xloc.bar_time,
+                  border_color = color.new(zoneColor, 40),
+                  bgcolor      = color.new(zoneColor, 85),
+                  border_width = bordWidth,
+                  border_style = bordStyle == draw.LineStyle.DASHED ? line.style_dashed : bordStyle == draw.LineStyle.DOTTED ? line.style_dotted : line.style_solid,
+                  extend       = extend.right,
+                  force_overlay = true)
+                array.push(boxArr, bx)
