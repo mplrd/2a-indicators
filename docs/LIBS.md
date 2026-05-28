@@ -21,9 +21,10 @@
 | `lib-signal` | 1 | **`2`** | 2026-05-21 | — | publié (v1 : `SignalKind` + `detectCMI()` ; v2 : retire la condition de direction de la SMA de référence, garde uniquement `open < ref` / `open > ref`) |
 | `lib-sd` | 1 | **`1`** | 2026-05-21 | `lib-zone` v1, `lib-signal` v2 | publié (v1 : `updateZones(sdZones, cmiSignal, maxZones)` qui orchestre lifecycle avant création + anti-chaînage + anti-chevauchement par remplacement + cleanup) |
 | `lib-fvg` | 1 | **`3`** | 2026-05-21 | `lib-zone` v1 | publié (v1 : `detect()` + `update()` avec exclusion N barres post-day-change ; v2 : remplace l'exclusion par un filtre transition temporelle `> 1.5×` durée bar ; v3 : ajoute `updateZones(fvgZones, maxZones)` qui orchestre lifecycle + detect + cleanup) |
-| `lib-gap` | 1 | _non publié_ | — | — | scaffold complet (UDT `Gap` + `detect()` + `update()`), à publier quand `zones-MTF.pine` en aura besoin |
+| `lib-gap` | 1 | **`6`** | 2026-05-26 | — | publié. v6 = **réécriture** portée de l'ancien indicateur (`_tv-indicators`) après faux gaps sur 24h + crash distance : API `detectDaily()` → [hasGap, top, bottom, dir(1/-1/0)] (détection sur barre daily `low/high` vs `close[1]`, appelée via `request.security(ticker,"D",…)`) + `checkFill(top,bottom,dir)` → [isFilled, isPartial, newTop, newBottom]. La box est créée 1× au day-change côté indicateur (`bar_index-1`) puis mutée. (v1-v5 obsolètes : detect/update/updateGaps/Gap/startBar, approche minuit-chart abandonnée.) Consommé par `levels.pine`. |
 | `lib-levels` | 1 | **`12`** | 2026-05-20 | `lib-time` v2 | publié (v1 `previousPeriodHL` + `ath()` ; v2 `sessionHL()` ; v3 `sessionOpen()` + `sessionIBR()` ; v4-v7 itérations IBR ; v8 `firstH1OfDay()` ; v9-v10 itérations OR + TZ ; v11 `sessionHL/Open` reset à minuit chart (param `chartTz`), `openRange(tz)` ; v12 `sessionHL` parse `sessionStr` pour borner sEnd dès début de session) |
 | `lib-structure` | 1 | **`3`** | 2026-05-22 | — | publié (v1 : UDT `IPA` + `IPAState` + `updateIPAs()` ; v2 : retest = close stricte ; v3 : retire `IPAState` (state pending en `var` interne, pattern lib-sd), remet retest = mèche, `array.set` défensif pour le break) |
+| `lib-cmi-zone` | 1 | **`4`** | 2026-05-28 | `lib-signal` v2 | publié. CmiZone self-contained (champs à plat, pas de wrap `zone.Zone` — contourne CE10263/CE10293 cross-lib enum), enums `CmiSide`/`CmiState`. API : `updateOne(cmiSignal, tfMinutes, lookbackBars, interestStartTime, maxZones) → array<CmiZone>` (state machine per-TF, validations parallèles via queue `PendingCMI` interne — la CMI inverse n'annule PAS, invalidation uniquement sur cassure d'extrême low/high). Construction sur le corps : bull Top = lowest `min(open,close)`, Bottom = lowest `low` (bear miroir). `intraOverlapPass(zones, pendingMode)` : déclenchement pending = open dans zone OU chevauchement géométrique. `crossTfOverlapPass(lower, higher)` : chevauchement seul. `computeInterestStarts(chartTz)` exporte les bornes (incluant `< M15` = 1re bougie de J-1, `M15` = lundi de la semaine dernière). `interestStartForTf(tfMinutes, chartTz)` mappe tfMin → borne. Orchestration MTF côté indicateur (CE10051 : `request.security` ne peut dépendre d'args de fonction exportée). Consommé par `zones-cmi.pine` ; `zones-MTF.pine` à wirer. |
 | `lib-draw` | 2 | **`15`** | 2026-05-21 | `lib-zone` v1 | publié (v4 `resolveLevelStartAndExtend` ; v5 `drawLevel` ; v6 `drawSessionLevel` ; v7 params `show` en `series bool` ; v8 `force_overlay` ; v9-v10 `drawSessionLevel` params `endTime` + `ongoing` + label adaptatif ; v11 `isHigh` + labels colorés ; v12 `col` en `series color` ; v13 ajout `drawZone()` + import `lib_zone` ; v14 `drawZone.lbl` en `series string` ; v15 ajout `drawDynamicLevel()` — couleur bull/bear + position label adaptatives selon `price > close`) |
 
 ## Imports actifs (à copier-coller)
@@ -42,12 +43,14 @@ import mpilard/lib_zone/1       as zone
 import mpilard/lib_signal/2     as signal
 import mpilard/lib_sd/1         as sd
 import mpilard/lib_fvg/3        as fvg
+import mpilard/lib_gap/6        as gap
 import mpilard/lib_levels/12    as levels
 import mpilard/lib_structure/3  as structure
+import mpilard/lib_cmi_zone/4   as cmiZone
 import mpilard/lib_draw/15      as draw
 ```
 
-Les libs non publiées (`lib_gap`) doivent garder leurs imports commentés (`// import mpilard/lib_X/<TODO> as X`) dans les fichiers qui les consomment.
+Toutes les libs sont publiées — aucun import à garder commenté à ce jour.
 
 ## Workflow de publication
 
@@ -76,6 +79,7 @@ Les alias courts à utiliser systématiquement dans les `import` :
 | `lib_sd` | `sd` |
 | `lib_fvg` | `fvg` |
 | `lib_gap` | `gap` |
+| `lib_cmi_zone` | `cmiZone` |
 | `lib_levels` | `levels` |
 | `lib_structure` | `structure` |
 | `lib_draw` | `draw` |
