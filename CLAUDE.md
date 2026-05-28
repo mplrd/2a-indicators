@@ -9,7 +9,7 @@ Specs complètes dans `docs/SPECIFICATIONS.md`.
 - **Langage**: Pine Script v6 (`//@version=6`)
 - **Plateforme actuelle**: TradingView
 - **Cibles futures**: cTrader, MetaTrader (MQL5), ProRealTime
-- **Code source**: `tradingview/*.pine`
+- **Code source** : `tradingview/*.pine` (indicateurs) + `tradingview/libraries/*.pine` (libs partagées)
 - **Specs**: `docs/SPECIFICATIONS.md` (référence unique du comportement attendu)
 - **Documentation feature**: `docs/<feature>.md` (français)
 
@@ -20,37 +20,44 @@ Découpage en **3 couches**. Objectif : qu'une stratégie (à venir) puisse impo
 ```
 indicators/
 ├── tradingview/
-│   │  --- Couche 0 : fondations (types & utils) ---
-│   ├── lib-time.pine        # Timezones, isNewDay, Session UDT, sessionStart/End
-│   ├── lib-market.pine      # Détection cashEU / cashUS / cashAsia / nonCash        (dep: lib-time)
-│   ├── lib-zone.pine        # UDT Zone, overlap, contains, cycle de vie, FIFO
-│   ├── lib-series.pine      # slope%, isFlatSeries, isClosingSeries (analytics génériques)
-│   │
-│   │  --- Couche 1 : signaux & calculs purs (importable par les stratégies) ---
-│   ├── lib-bollinger.pine   # BB inner/outer
-│   ├── lib-ma.pine          # SMA, ribbon (SMA ± std)                                (dep: lib-bollinger)
-│   ├── lib-ichimoku.pine    # Tenkan / Kijun / Senkou A&B / Chikou
-│   ├── lib-supertrend.pine  # Line + dir normalisée ±1
-│   ├── lib-signal.pine      # Bougies de signal : CMI, englobantes, open en extrême (dep: lib-series)
-│   ├── lib-sd.pine          # Supply/Demand zones lifecycle current TF              (dep: lib-zone, lib-signal)
-│   ├── lib-fvg.pine         # Détection FVG, niveaux, comblement, retourne une Zone (dep: lib-zone)
-│   ├── lib-gap.pine         # Détection gap daily + cycle de vie                     (dep: lib-time)
-│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, OR                 (dep: lib-time, lib-market)
-│   │
-│   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
-│   ├── lib-draw.pine        # Palette, styles, drawLevel, drawSessionLevel, drawZone  (dep: lib-zone pour drawZone)
+│   ├── libraries/              # Libs partagées, publiées sur TradingView (cf. docs/LIBS.md).
+│   │   │                       # Le préfixe `lib-` du nom de fichier disparaît (redondant avec
+│   │   │                       # le dossier) ; le nom publié reste `lib_X` (cf. `library("lib_X")`).
+│   │   │  --- Couche 0 : fondations (types & utils) ---
+│   │   ├── time.pine           # Timezones, isNewDay, sessionStart/End
+│   │   ├── market.pine         # Détection cashEU / cashUS / cashAsia / nonCash         (dep: time)
+│   │   ├── zone.pine           # UDT Zone, overlap, contains, cycle de vie, FIFO
+│   │   ├── series.pine         # slope%, isFlatSeries, isClosingSeries (analytics génériques)
+│   │   │
+│   │   │  --- Couche 1 : signaux & calculs purs (importable par les stratégies) ---
+│   │   ├── bollinger.pine      # BB inner/outer                                          (dep: series)
+│   │   ├── ma.pine             # SMA, projectSMA                                         (dep: bollinger, series)
+│   │   ├── ichimoku.pine       # Tenkan / Kijun / Senkou A&B / Chikou
+│   │   ├── supertrend.pine     # Line + dir normalisée ±1
+│   │   ├── signal.pine         # Bougies de signal : CMI, englobantes, open en extrême  (dep: series)
+│   │   ├── sd.pine             # Supply/Demand zones lifecycle current TF                (dep: zone, signal)
+│   │   ├── fvg.pine            # Détection FVG, niveaux, comblement, retourne une Zone  (dep: zone)
+│   │   ├── gap.pine            # Détection gap daily multi-TF + cycle de vie
+│   │   ├── levels.pine         # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, OR, sessions       (dep: time, market)
+│   │   ├── structure.pine      # IPA (market structure)
+│   │   ├── cmi-zone.pine       # CMI Zones state machine (validations parallèles)        (dep: signal)
+│   │   │
+│   │   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
+│   │   └── draw.pine           # Palette, styles, drawLevel, drawSessionLevel, drawZone,
+│   │                           # drawDynamicLevel                                        (dep: zone)
 │   │
 │   │  --- Indicateurs ---
-│   ├── layout.pine          # 2Ai Layout
-│   ├── levels.pine          # 2Ai Levels
-│   ├── zones.pine           # 2Ai Zones
-│   ├── zones-MTF.pine       # 2Ai Zones MTF
-│   └── *.pine               # Tout autre 2Ai XXX
+│   ├── layout.pine             # 2Ai Layout
+│   ├── levels.pine             # 2Ai Levels (homonyme de la lib `libraries/levels.pine` — distinct)
+│   ├── zones-SD.pine           # 2Ai Zones (Supply/Demand + FVG)
+│   ├── zones-CMI.pine          # 2Ai CMI Zones (test single-TF, valide la state machine cmi-zone)
+│   ├── zones-MTF.pine          # 2Ai Zones MTF (CMI MTF — scaffold, à wirer)
+│   └── *.pine                  # Tout autre 2Ai XXX
 ├── docs/
-│   ├── SPECIFICATIONS.md    # Référence du comportement attendu
-│   ├── LIBS.md              # Tableau des versions publiées de chaque lib
-│   └── <feature>.md         # Doc par feature (français)
-└── .claude/skills/          # Skills invocables
+│   ├── SPECIFICATIONS.md       # Référence du comportement attendu
+│   ├── LIBS.md                 # Tableau des versions publiées de chaque lib
+│   └── <feature>.md            # Doc par feature (français)
+└── .claude/skills/             # Skills invocables
 ```
 
 ### Règle d'or — isolation des couches
@@ -155,7 +162,7 @@ En cas d'erreur de compilation inexpliquée sur un `if`/`for` ou une expression 
 Les futures cibles (cTrader, MetaTrader, PRT) n'ont **pas** d'équivalent direct des `box`/`line`/`label` Pine ni du modèle de série temporelle Pine. Le portage = réécriture, pas conversion auto. C'est précisément pour ça que toute la logique métier vit dans les libs : pour avoir une "spec exécutable" claire à porter.
 
 ## Skills
-- `/new-library` — scaffold d'une nouvelle `lib-xxx.pine`
+- `/new-library` — scaffold d'une nouvelle lib (`tradingview/libraries/xxx.pine`)
 - `/new-indicator` — scaffold d'un nouvel indicateur 2Ai
 - `/doc-feature` — génère/maj doc française d'une feature dans `docs/`
 - `/update-specs` — met à jour `docs/SPECIFICATIONS.md` quand un comportement change

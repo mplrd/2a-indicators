@@ -52,7 +52,7 @@ Pour chaque match :
   - Remplacer `<n>` ou `1` par `<nouvelle version>`
 
 ### 6. Signaler les libs dépendantes à republier
-- Identifier les libs qui importent `lib_x` (via grep dans `tradingview/lib-*.pine`).
+- Identifier les libs qui importent `lib_x` (via grep dans `tradingview/libraries/*.pine`).
 - Pour chaque lib dépendante DÉJÀ publiée (donc présente dans "Imports actifs"), prévenir l'utilisateur :
   > « `lib_y` consomme `lib_x` et est déjà publiée en v<N>. Il faut la republier (elle deviendra v<N+1>) pour que ses utilisateurs prennent en compte le bump. »
 
@@ -65,7 +65,7 @@ Sortie attendue, format markdown court :
 ✅ `docs/LIBS.md` mis à jour (table + imports actifs)
 ✅ <N> fichier(s) Pine mis à jour :
    - tradingview/foo.pine : import bumpé/activé
-   - tradingview/lib-bar.pine : import bumpé/activé
+   - tradingview/libraries/bar.pine : import bumpé/activé
 
 ⚠️ Libs dépendantes déjà publiées à republier (sinon stack désynchronisée) :
    - lib_bar v<old> → republier
@@ -77,4 +77,4 @@ Sortie attendue, format markdown court :
 ## Anti-patterns à éviter
 - Ne **jamais** inventer un publisher ou une version. Si LIBS.md n'a pas le publisher renseigné, demander à l'utilisateur.
 - Ne **pas** propager dans les fichiers `docs/` (sauf LIBS.md) ni dans `.claude/`.
-- Ne **pas** toucher les fichiers `tradingview/lib-x.pine` (la lib elle-même) — sa version sur disque ≠ sa version publiée, par construction.
+- Ne **pas** toucher les fichiers `tradingview/libraries/x.pine` (la lib elle-même) — sa version sur disque ≠ sa version publiée, par construction.
