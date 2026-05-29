@@ -119,9 +119,9 @@ ma7Display      = ma7Enabled       ? display.all : display.none
 ma20Display     = ma20Enabled      ? display.all : display.none
 ma50Display     = ma50Enabled      ? display.all : display.none
 ma200Display    = ma200Enabled     ? display.all : display.none
-ichiMainDisplay = ichiEnabled and not ichiChikouOnly ? display.all : display.none
-ichiChiDisplay  = ichiEnabled      ? display.all : display.none
-stDisplay       = stEnabled        ? display.all : display.none
+// Ichimoku / Supertrend : pas de display var intermédiaire — la lib `draw.plotIchimoku` /
+// `draw.plotSupertrend` prend des `simple bool on` et calcule display.all/display.none en interne
+// (contrainte CE10149 sur `plot_display` en v6).
 
 // ============================================================
 // Calculs — Bollinger Classique
@@ -264,12 +264,12 @@ fill(pMa200U, pMa200L, color = ma200Mode == "ribbon" ? color.new(ma200Color, RIB
 // Rendu — Ichimoku (Senkou A/B décalés +ICHI_KIJUN, Chikou décalée -ICHI_KIJUN)
 // Délégué à `draw.plotIchimoku` (lib_draw v17).
 // ============================================================
-draw.plotIchimoku(tenkan, kijun, senkouA, senkouB, chikou, ichiTenkanCol, ichiKijunCol, senkouAColor, senkouBColor, kumoColor, ichiChikouCol, ICHI_KIJUN, ichiMainDisplay, ichiChiDisplay)
+draw.plotIchimoku(tenkan, kijun, senkouA, senkouB, chikou, ichiTenkanCol, ichiKijunCol, senkouAColor, senkouBColor, kumoColor, ichiChikouCol, ICHI_KIJUN, ichiEnabled and not ichiChikouOnly, ichiEnabled)
 
 // ============================================================
 // Rendu — Supertrend (style_linebr délégué à `draw.plotSupertrend`).
 // ============================================================
-draw.plotSupertrend(stLineBroken, stColor, 2, stDisplay)
+draw.plotSupertrend(stLineBroken, stColor, 2, stEnabled)
 
 // ============================================================
 // Projection MA / BB (hypothèse : close reste constant sur N barres futures)
