@@ -17,7 +17,7 @@ import mpilard/lib_signal/2 as signal
 import mpilard/lib_zone/1   as zone
 import mpilard/lib_sd/1     as sd
 import mpilard/lib_fvg/3    as fvg
-import mpilard/lib_draw/15  as draw
+import mpilard/lib_draw/16  as draw
 
 // ============================================================
 // Inputs
@@ -98,21 +98,20 @@ if barstate.islast
         label.delete(lb)
     array.clear(labelArr)
 
-    // Rendu des zones S/D actives (transparence 85% fond / 40% bordure cf. spec).
+    // Rendu des zones S/D actives via `draw.drawZoneBox` (primitive lib_draw agnostique du type).
+    // On déballe Zone → primitives au call site et passe `zone.isActive(z)` comme bool d'activité.
     // CMI bull → Demand (support potentiel) ; CMI bear → Supply (résistance potentielle).
     // Safe mode : on ne dessine que si la zone a un FVG aligné (même side, chevauchement prix).
-    // Réglages par side : Demand et Supply ont chacun leur enabled / couleur / bordure / épaisseur.
-    // drawZone attend des params `simple` (width, style) → 2 appels mutuellement exclusifs par side
-    // (pattern levels.pine IPA), pas de ternaire `series`.
+    // Réglages par side : 2 appels mutuellement exclusifs par side (pattern levels.pine IPA).
     for z in sdZones
         isBull   = z.side == zone.ZoneSide.BULL
         keepBase = (not safeMode) or hasOverlappingActiveSameSide(fvgZones, z)
-        draw.drawZone(demandEnabled and isBull       and keepBase, z, demandColor, demandBorderWidth, demandBorderStyle, 85, 40, false, "", boxArr, labelArr)
-        draw.drawZone(supplyEnabled and (not isBull) and keepBase, z, supplyColor, supplyBorderWidth, supplyBorderStyle, 85, 40, false, "", boxArr, labelArr)
+        draw.drawZoneBox(demandEnabled and isBull       and keepBase, zone.isActive(z), z.leftTime, z.top, z.bottom, demandColor, demandBorderWidth, demandBorderStyle, 85, 40, false, "", boxArr, labelArr)
+        draw.drawZoneBox(supplyEnabled and (not isBull) and keepBase, zone.isActive(z), z.leftTime, z.top, z.bottom, supplyColor, supplyBorderWidth, supplyBorderStyle, 85, 40, false, "", boxArr, labelArr)
 
     // Rendu des FVG actifs. Réglages par side (Bullish / Bearish). Safe mode : seulement si un S/D aligné existe.
     for z in fvgZones
         isBull   = z.side == zone.ZoneSide.BULL
         keepBase = (not safeMode) or hasOverlappingActiveSameSide(sdZones, z)
-        draw.drawZone(fvgBullEnabled and isBull       and keepBase, z, fvgBullColor, fvgBullBorderWidth, fvgBullBorderStyle, 85, 40, false, "", boxArr, labelArr)
-        draw.drawZone(fvgBearEnabled and (not isBull) and keepBase, z, fvgBearColor, fvgBearBorderWidth, fvgBearBorderStyle, 85, 40, false, "", boxArr, labelArr)
+        draw.drawZoneBox(fvgBullEnabled and isBull       and keepBase, zone.isActive(z), z.leftTime, z.top, z.bottom, fvgBullColor, fvgBullBorderWidth, fvgBullBorderStyle, 85, 40, false, "", boxArr, labelArr)
+        draw.drawZoneBox(fvgBearEnabled and (not isBull) and keepBase, zone.isActive(z), z.leftTime, z.top, z.bottom, fvgBearColor, fvgBearBorderWidth, fvgBearBorderStyle, 85, 40, false, "", boxArr, labelArr)

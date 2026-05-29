@@ -3,8 +3,9 @@
 //              Couche 2 (aucune logique métier, dessine ce qu'on lui passe).
 library("lib_draw", overlay = true)
 
-// Import lib_zone pour drawZone — lib_zone doit être publiée AVANT de pouvoir bump lib_draw.
-import mpilard/lib_zone/1 as zone
+// Pas d'import UDT — `drawZoneBox` prend des primitives (left/top/bottom/isActive) plutôt qu'un
+// type concret. lib_draw reste agnostique de `lib_zone` / `lib_cmi_zone` ; les callers déballent
+// leur UDT au call site. Plus simple à porter sur cTrader/MT4 ensuite.
 
 // ============================================================
 // Styles de ligne — enum + helpers
@@ -196,30 +197,37 @@ export drawSessionLevel(series bool show, float price, int startTime, int endTim
     ln
 
 // ============================================================
-// Zones — rendu d'une `lib_zone.Zone` en `box`
+// Zones — rendu d'un rectangle en `box` (primitive agnostique du type d'origine)
 // ============================================================
 
-// @function Dessine une `Zone` en `box` rectangulaire. Box ancrée à `z.leftTime`, étendue à droite.
-//           Ne dessine RIEN si la zone n'est pas `active` (cf. `lib_zone.isActive`).
-//           Le label (optionnel) est placé à droite du chart, centré verticalement sur la zone.
-// @param show         Toggle global.
-// @param z            Zone à dessiner (cf. `lib_zone.Zone`).
+// @function Dessine un rectangle (box) ancré à `leftTime`, étendu à droite. Ne dessine RIEN si
+//           `show` est faux ou si `isActive` est faux ou si une coordonnée est `na`. Le label
+//           (optionnel) est placé à droite du chart, centré verticalement sur la zone.
+//           Cette primitive est agnostique du type UDT (Zone, CmiZone, futurs) : le caller
+//           déballe son UDT et passe les champs en primitives. Évite la duplication entre
+//           `drawZone(z.Zone)` et `drawCmiZone(cz.CmiZone)`.
+// @param show         Toggle global (peut intégrer un filtre côté caller).
+// @param isActive     true = la zone est encore vivante (caller : `zone.isActive(z)` ou
+//                     `cz.state == cmiZone.CmiState.ACTIVE`).
+// @param leftTime     Timestamp ms de la barre d'origine (xloc.bar_time).
+// @param top          Borne haute du rectangle.
+// @param bottom       Borne basse du rectangle.
 // @param col          Couleur de bordure et fond.
-// @param borderWidth  Épaisseur de bordure (0 = bordure invisible).
+// @param borderWidth  Épaisseur de bordure (0 = invisible).
 // @param borderStyle  Style de bordure (`LineStyle.SOLID` / `DASHED` / `DOTTED`).
 // @param bgAlpha      Transparence du fond (0 = opaque, 100 = invisible).
 // @param borderAlpha  Transparence de la bordure.
 // @param showLbl      Toggle d'affichage du label.
-// @param lbl          Texte du label (ex : "S/D bull", "FVG bear"). `""` = pas de label même si `showLbl=true`.
+// @param lbl          Texte du label (ex : "S/D bull"). `""` = pas de label même si `showLbl=true`.
 // @param boxArr       Array des boxes (push uniquement, le caller gère le nettoyage).
 // @param labelArr     Array des labels (push uniquement).
 // @returns series box — la box créée ou `na`.
-export drawZone(series bool show, zone.Zone z, series color col, simple int borderWidth, simple LineStyle borderStyle, simple int bgAlpha, simple int borderAlpha, simple bool showLbl, series string lbl, array<box> boxArr, array<label> labelArr) =>
+export drawZoneBox(series bool show, series bool isActive, int leftTime, float top, float bottom, series color col, simple int borderWidth, simple LineStyle borderStyle, simple int bgAlpha, simple int borderAlpha, simple bool showLbl, series string lbl, array<box> boxArr, array<label> labelArr) =>
     box bx = na
-    if show and not na(z) and zone.isActive(z)
+    if show and isActive and not na(leftTime) and not na(top) and not na(bottom)
         oneBarMs = timeframe.in_seconds() * 1000
         bx := box.new(
-          left = z.leftTime, top = z.top, right = time + oneBarMs * 5, bottom = z.bottom,
+          left = leftTime, top = top, right = time + oneBarMs * 5, bottom = bottom,
           xloc = xloc.bar_time,
           border_color = color.new(col, borderAlpha),
           bgcolor = color.new(col, bgAlpha),
@@ -230,7 +238,7 @@ export drawZone(series bool show, zone.Zone z, series color col, simple int bord
         array.push(boxArr, bx)
         if showLbl and lbl != ""
             lb = label.new(
-              x = bar_index + 20, y = (z.top + z.bottom) / 2.0, text = lbl,
+              x = bar_index + 20, y = (top + bottom) / 2.0, text = lbl,
               xloc = xloc.bar_index, style = label.style_label_center,
               color = col, textcolor = color.white, size = size.small,
               force_overlay = true)
