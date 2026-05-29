@@ -6,7 +6,7 @@ indicator("2Ai Layout", shorttitle = "2Ai Layout", overlay = true, max_lines_cou
 // Imports
 // ============================================================
 import mpilard/lib_series/2     as series
-import mpilard/lib_bollinger/2  as bb
+import mpilard/lib_bollinger/3  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
