@@ -19,13 +19,6 @@ export enum LineStyle
     DASHED = "----"
     DOTTED = "····"
 
-// @function Convertit une valeur `LineStyle` en constante Pine `line.style_*` pour `line.new()` / `hline()`.
-//           `line.new()` accepte un style en `series`, donc un retour `simple` depuis une lib passe sans souci.
-// @param s Style désiré.
-// @returns Constante de style de ligne pour line.new.
-export lineStyle(simple LineStyle s = LineStyle.SOLID) =>
-    s == LineStyle.DASHED ? line.style_dashed : s == LineStyle.DOTTED ? line.style_dotted : line.style_solid
-
 // NB — pas d'équivalent `plotLineStyle()` exportable depuis cette lib :
 //      `plot(..., linestyle = ...)` exige un `input plot_line_style`. Or Pine n'autorise pas le
 //      qualifier `input` sur les params d'exports de lib (CE10160) — seuls `simple` et `series` sont
@@ -39,13 +32,6 @@ export lineStyle(simple LineStyle s = LineStyle.SOLID) =>
 // ============================================================
 // Couleurs
 // ============================================================
-
-// @function Applique une transparence à une couleur (0 = opaque, 100 = invisible).
-// @param c     Couleur source.
-// @param alpha Transparence Pine (0-100).
-// @returns Nouvelle couleur avec la transparence appliquée.
-export withAlpha(series color c, simple int alpha) =>
-    color.new(c, alpha)
 
 // @function Couleur d'une bande Bollinger selon son état (plate / en fermeture) et son côté (haute / basse).
 //           Quand la bande est ouverte → baseColor. Quand elle est plate ou en fermeture → bull (bande basse)
@@ -65,17 +51,15 @@ export bandColor(series color baseColor, series color bullColor, series color be
 // Niveaux horizontaux — choix start / extension
 // ============================================================
 
-// @function Détermine où commencer une ligne de niveau et avec quelle extension :
-//           - Si le point d'origine est connu, valide, et dans les `MAX_LOOKBACK` dernières barres
+// @function (privé) Détermine où commencer une ligne de niveau et avec quelle extension :
+//           - Si le point d'origine est connu, valide, et dans les 365 dernières barres
 //             → la ligne part de `startBar` et s'étend à droite (`extend.right`).
 //           - Sinon (origine inconnue, trop ancienne, ou hors plage du chart courant)
 //             → la ligne part de la barre courante et s'étend des deux côtés (`extend.both`).
 //           Ce pattern permet de toujours dessiner un niveau même quand sa barre d'origine
 //           n'est pas visible dans la TF courante (ex : ATH atteint il y a des années).
-// @param startBar      Index de la barre d'origine (peut être `na` si inconnu).
-// @param startBarFound Drapeau indiquant si l'origine est connue et tracable.
-// @returns Tuple [startX, extendMode] à passer directement à `line.new(x1 = startX, extend = extendMode, ...)`.
-export resolveLevelStartAndExtend(series int startBar, series bool startBarFound) =>
+//           Utilisé en interne par `drawLevel`.
+resolveLevelStartAndExtend(series int startBar, series bool startBarFound) =>
     drawable = startBarFound and not na(startBar) and startBar >= 0 and startBar <= bar_index and (bar_index - startBar) <= 365
     [drawable ? startBar : bar_index, drawable ? extend.right : extend.both]
 
@@ -323,83 +307,16 @@ export clearLabels(array<label> labelArr) =>
     array.clear(labelArr)
 
 // ============================================================
-// Bollinger — wrappers `plot` + `fill` pour le pattern ribbon/lines
+// Plots de bandes (BB / MA) — NON wrappés en lib
 // ============================================================
-// NB : Pine v6 exige `input plot_line_style` pour `plot(..., linestyle = ...)`. Une lib ne peut
-//      pas qualifier ses params `input` (CE10160), et un `simple plot_line_style` calculé en interne
-//      est refusé par plot (CE10123). Solution : 2 helpers, un par mode, avec linestyle hardcodé en
-//      const directement dans `plot(...)`. L'indicateur choisit via `if/else` (chaque branche appelle
-//      le même nombre de plot avec les mêmes titres → Pine accepte).
-
-// @function Dessine une paire de bandes Bollinger en mode RIBBON : outer SOLID + accent + inner
-//           SOLID + fill semi-opaque entre outer et inner (haut + bas). 8 calls (6 plot + 2 fill).
-// @param titlePrefix    Préfixe des titres (ex : "BBc", "BBm" — différencie les plots dans la data window).
-// @param outerU         Série outer upper.
-// @param outerL         Série outer lower.
-// @param innerU         Série inner upper.
-// @param innerL         Série inner lower.
-// @param outerCol       Couleur des bandes outer (base).
-// @param accentUCol     Couleur de l'accent haut (appliquée quand la bande est plate/closing).
-// @param accentLCol     Couleur de l'accent bas.
-// @param innerCol       Couleur des bandes inner.
-// @param fillUCol       Couleur de remplissage haute (avant transparence).
-// @param fillLCol       Couleur de remplissage basse.
-// @param fillUAlpha     Transparence du fill haut (0-100).
-// @param fillLAlpha     Transparence du fill bas.
-// @param outerWidth     Épaisseur des outer + inner.
-// @param accentWidth    Épaisseur des accents.
-// @param outerDisplay   Display.all / display.none — visibilité globale du bloc.
-// @param innerDisplay   Display des bandes inner (pour distinguer ribbon-visible vs ribbon-mais-inner-caché).
-export plotBollingerRibbon(simple string titlePrefix, series float outerU, series float outerL, series float innerU, series float innerL, series color outerCol, series color accentUCol, series color accentLCol, series color innerCol, series color fillUCol, series color fillLCol, simple int fillUAlpha, simple int fillLAlpha, simple int outerWidth, simple int accentWidth, simple plot_display outerDisplay, simple plot_display innerDisplay) =>
-    pOuterU = plot(outerU, titlePrefix + " outer high", color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = outerDisplay)
-    pOuterL = plot(outerL, titlePrefix + " outer low",  color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = outerDisplay)
-    plot(outerU, titlePrefix + " accent high", color = accentUCol, linewidth = accentWidth, display = outerDisplay)
-    plot(outerL, titlePrefix + " accent low",  color = accentLCol, linewidth = accentWidth, display = outerDisplay)
-    pInnerU = plot(innerU, titlePrefix + " inner high", color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = innerDisplay, editable = false)
-    pInnerL = plot(innerL, titlePrefix + " inner low",  color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = innerDisplay, editable = false)
-    fill(pOuterU, pInnerU, color = color.new(fillUCol, fillUAlpha), title = titlePrefix + " ribbon high", display = outerDisplay)
-    fill(pOuterL, pInnerL, color = color.new(fillLCol, fillLAlpha), title = titlePrefix + " ribbon low",  display = outerDisplay)
-
-// @function Variante "lignes" de `plotBollingerRibbon` : outer DOTTED + accent + inner DOTTED + pas
-//           de fill (color = na). Même nombre de plot/fill et mêmes titres → compatible avec un
-//           if/else cote indicateur qui dispatche entre les deux modes.
-export plotBollingerLines(simple string titlePrefix, series float outerU, series float outerL, series float innerU, series float innerL, series color outerCol, series color accentUCol, series color accentLCol, series color innerCol, simple int outerWidth, simple int accentWidth, simple plot_display outerDisplay, simple plot_display innerDisplay) =>
-    pOuterU = plot(outerU, titlePrefix + " outer high", color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = outerDisplay)
-    pOuterL = plot(outerL, titlePrefix + " outer low",  color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = outerDisplay)
-    plot(outerU, titlePrefix + " accent high", color = accentUCol, linewidth = accentWidth, display = outerDisplay)
-    plot(outerL, titlePrefix + " accent low",  color = accentLCol, linewidth = accentWidth, display = outerDisplay)
-    pInnerU = plot(innerU, titlePrefix + " inner high", color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = innerDisplay, editable = false)
-    pInnerL = plot(innerL, titlePrefix + " inner low",  color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = innerDisplay, editable = false)
-    fill(pOuterU, pInnerU, color = na, title = titlePrefix + " ribbon high", display = outerDisplay)
-    fill(pOuterL, pInnerL, color = na, title = titlePrefix + " ribbon low",  display = outerDisplay)
-
-// ============================================================
-// MA — wrappers `plot` + `fill` pour le pattern ribbon/lines (1 basis + 2 invisibles + 1 fill)
-// ============================================================
-
-// @function Dessine une MA en mode RIBBON : basis SOLID + 2 plots invisibles (upper/lower bands) +
-//           fill semi-opaque entre les 2. 4 calls. Pattern identique pour MA7/20/50/200.
-// @param title       Titre du basis (ex : "MA7"). Les invisibles auront `title + "_U"` / `_L`.
-// @param basis       Série basis (SMA).
-// @param upperBand   Série upper band (basis + std).
-// @param lowerBand   Série lower band (basis - std).
-// @param col         Couleur du basis (et du fill avant transparence).
-// @param width       Épaisseur du basis.
-// @param fillAlpha   Transparence du fill ribbon.
-// @param display     Display.all / display.none — visibilité globale.
-export plotMARibbon(simple string title, series float basis, series float upperBand, series float lowerBand, series color col, simple int width, simple int fillAlpha, simple plot_display display) =>
-    plot(basis, title, color = col, linewidth = width, linestyle = plot.linestyle_solid, display = display)
-    pU = plot(upperBand, title + "_U", color = na, display = display.none, editable = false)
-    pL = plot(lowerBand, title + "_L", color = na, display = display.none, editable = false)
-    fill(pU, pL, color = color.new(col, fillAlpha), title = title + " fill", display = display)
-
-// @function Variante "lignes" de `plotMARibbon` : basis DOTTED + 2 invisibles + fill = na.
-//           Même structure de calls (4) → compatible if/else en indicateur.
-export plotMALines(simple string title, series float basis, series float upperBand, series float lowerBand, series color col, simple int width, simple plot_display display) =>
-    plot(basis, title, color = col, linewidth = width, linestyle = plot.linestyle_dotted, display = display)
-    pU = plot(upperBand, title + "_U", color = na, display = display.none, editable = false)
-    pL = plot(lowerBand, title + "_L", color = na, display = display.none, editable = false)
-    fill(pU, pL, color = na, title = title + " fill", display = display)
+// Note : Pine v6 exige `input plot_line_style` pour `plot(..., linestyle = ...)`. Une lib ne peut
+//        pas qualifier ses params `input` (CE10160), et un `simple plot_line_style` calculé en
+//        interne est refusé par plot (CE10123). Tant que l'indicateur expose un input.enum de
+//        style à l'utilisateur, le `plot(linestyle = ...)` doit rester au call site — c'est une
+//        contrainte plateforme, pas un manque de discipline. Les helpers `plotBollingerRibbon`,
+//        `plotBollingerLines`, `plotMARibbon`, `plotMALines` (esquissés en v17 puis retirés) ne
+//        couvrent en pratique qu'un cas où le style serait câblé dans la lib — pas applicable
+//        ici. À réintroduire si un futur indicateur a un design qui s'en accommode.
 
 // ============================================================
 // Ichimoku — wrapper plot Tenkan / Kijun / Senkou A / Senkou B / Chikou + fill Kumo
