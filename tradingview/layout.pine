@@ -10,7 +10,7 @@ import mpilard/lib_bollinger/2  as bb
 import mpilard/lib_ma/2         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_draw/16      as draw
+import mpilard/lib_draw/17      as draw
 
 // ============================================================
 // Inputs — UI organisée façon legacy : un inline= par feature, titres vides après le 1er, dropdown
@@ -262,18 +262,14 @@ fill(pMa200U, pMa200L, color = ma200Mode == "ribbon" ? color.new(ma200Color, RIB
 
 // ============================================================
 // Rendu — Ichimoku (Senkou A/B décalés +ICHI_KIJUN, Chikou décalée -ICHI_KIJUN)
+// Délégué à `draw.plotIchimoku` (lib_draw v17).
 // ============================================================
-plot(tenkan, "Tenkan", color = ichiTenkanCol, linewidth = 1, display = ichiMainDisplay)
-plot(kijun,  "Kijun",  color = ichiKijunCol,  linewidth = 1, display = ichiMainDisplay)
-pSenkouA = plot(senkouA, "Senkou A", color = senkouAColor, linewidth = 1, offset = ICHI_KIJUN, display = ichiMainDisplay)
-pSenkouB = plot(senkouB, "Senkou B", color = senkouBColor, linewidth = 1, offset = ICHI_KIJUN, display = ichiMainDisplay)
-fill(pSenkouA, pSenkouB, color = kumoColor, title = "Kumo", display = ichiMainDisplay)
-plot(chikou, "Chikou", color = ichiChikouCol, linewidth = 1, offset = -ICHI_KIJUN, display = ichiChiDisplay)
+draw.plotIchimoku(tenkan, kijun, senkouA, senkouB, chikou, ichiTenkanCol, ichiKijunCol, senkouAColor, senkouBColor, kumoColor, ichiChikouCol, ICHI_KIJUN, ichiMainDisplay, ichiChiDisplay)
 
 // ============================================================
-// Rendu — Supertrend
+// Rendu — Supertrend (style_linebr délégué à `draw.plotSupertrend`).
 // ============================================================
-plot(stLineBroken, "Supertrend", color = stColor, linewidth = 2, style = plot.style_linebr, display = stDisplay)
+draw.plotSupertrend(stLineBroken, stColor, 2, stDisplay)
 
 // ============================================================
 // Projection MA / BB (hypothèse : close reste constant sur N barres futures)
@@ -292,36 +288,25 @@ ma200BasisProj = ma.projectSMA(close, 200, PROJECT_BARS)
 var array<line> projLines = array.new<line>()
 
 if barstate.islast
-    // Nettoyage des lignes précédentes (rafraîchies à chaque tick).
-    for ln in projLines
-        line.delete(ln)
-    array.clear(projLines)
+    draw.clearLines(projLines)
 
     bi    = bar_index
     biFut = bi + PROJECT_BARS
 
-    // Projection MM
+    // Projection MM — chaque appel `draw.drawProjection` push une ligne pointillée dans `projLines`.
     if projectMA
-        if ma7Enabled
-            array.push(projLines, line.new(bi, ma7Basis,   biFut, ma7BasisProj,   color = ma7Color,   style = line.style_dotted, width = 1))
-        if ma20Enabled
-            array.push(projLines, line.new(bi, ma20Basis,  biFut, ma20BasisProj,  color = ma20Color,  style = line.style_dotted, width = 1))
-        if ma50Enabled
-            array.push(projLines, line.new(bi, ma50Basis,  biFut, ma50BasisProj,  color = ma50Color,  style = line.style_dotted, width = 2))
-        if ma200Enabled
-            array.push(projLines, line.new(bi, ma200Basis, biFut, ma200BasisProj, color = ma200Color, style = line.style_dotted, width = 2))
+        draw.drawProjection(ma7Enabled,   bi, ma7Basis,   biFut, ma7BasisProj,   ma7Color,   1, projLines)
+        draw.drawProjection(ma20Enabled,  bi, ma20Basis,  biFut, ma20BasisProj,  ma20Color,  1, projLines)
+        draw.drawProjection(ma50Enabled,  bi, ma50Basis,  biFut, ma50BasisProj,  ma50Color,  2, projLines)
+        draw.drawProjection(ma200Enabled, bi, ma200Basis, biFut, ma200BasisProj, ma200Color, 2, projLines)
 
     // Projection BB : outer toujours, inner en plus en mode ribbon
     if projectBB
-        if bbcEnabled
-            array.push(projLines, line.new(bi, bbcOuterU, biFut, bbcOuterUProj, color = bbcColor, style = line.style_dotted, width = 1))
-            array.push(projLines, line.new(bi, bbcOuterL, biFut, bbcOuterLProj, color = bbcColor, style = line.style_dotted, width = 1))
-            if bbcIsRibbon
-                array.push(projLines, line.new(bi, bbcInnerU, biFut, bbcInnerUProj, color = bbcInnerCol, style = line.style_dotted, width = 1))
-                array.push(projLines, line.new(bi, bbcInnerL, biFut, bbcInnerLProj, color = bbcInnerCol, style = line.style_dotted, width = 1))
-        if bbmEnabled
-            array.push(projLines, line.new(bi, bbmOuterU, biFut, bbmOuterUProj, color = bbmColor, style = line.style_dotted, width = 2))
-            array.push(projLines, line.new(bi, bbmOuterL, biFut, bbmOuterLProj, color = bbmColor, style = line.style_dotted, width = 2))
-            if bbmIsRibbon
-                array.push(projLines, line.new(bi, bbmInnerU, biFut, bbmInnerUProj, color = bbmInnerCol, style = line.style_dotted, width = 1))
-                array.push(projLines, line.new(bi, bbmInnerL, biFut, bbmInnerLProj, color = bbmInnerCol, style = line.style_dotted, width = 1))
+        draw.drawProjection(bbcEnabled,                bi, bbcOuterU, biFut, bbcOuterUProj, bbcColor,    1, projLines)
+        draw.drawProjection(bbcEnabled,                bi, bbcOuterL, biFut, bbcOuterLProj, bbcColor,    1, projLines)
+        draw.drawProjection(bbcEnabled and bbcIsRibbon, bi, bbcInnerU, biFut, bbcInnerUProj, bbcInnerCol, 1, projLines)
+        draw.drawProjection(bbcEnabled and bbcIsRibbon, bi, bbcInnerL, biFut, bbcInnerLProj, bbcInnerCol, 1, projLines)
+        draw.drawProjection(bbmEnabled,                bi, bbmOuterU, biFut, bbmOuterUProj, bbmColor,    2, projLines)
+        draw.drawProjection(bbmEnabled,                bi, bbmOuterL, biFut, bbmOuterLProj, bbmColor,    2, projLines)
+        draw.drawProjection(bbmEnabled and bbmIsRibbon, bi, bbmInnerU, biFut, bbmInnerUProj, bbmInnerCol, 1, projLines)
+        draw.drawProjection(bbmEnabled and bbmIsRibbon, bi, bbmInnerL, biFut, bbmInnerLProj, bbmInnerCol, 1, projLines)
