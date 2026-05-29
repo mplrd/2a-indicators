@@ -390,10 +390,12 @@ export intraOverlapPass(array<CmiZone> zones, bool pendingMode) =>
     zones
 
 // @function Downgrade en PENDING toute CmiZone ACTIVE de `lower` qui chevauche geometriquement
-//           une zone non-expiree de `higher` (TF superieur). Cross-TF n'utilise PAS le critere
-//           open-in-zone (contextes de TF differents) — uniquement chevauchement geometrique.
-//           Reactivation auto par le tour suivant d'`intraOverlapPass` quand le bloqueur disparait.
-//           Idempotent.
+//           une zone **ACTIVE** de `higher` (TF superieur). Une zone haute PENDING ne bloque PAS :
+//           si elle-meme n'est pas affichee, elle ne peut pas justifier de cacher une zone basse.
+//           Cross-TF n'utilise PAS le critere open-in-zone (contextes de TF differents) —
+//           uniquement chevauchement geometrique.
+//           Reactivation auto par le tour suivant d'`intraOverlapPass` quand le bloqueur disparait
+//           ou redevient ACTIVE. Idempotent.
 // @param lower   array<CmiZone> du TF inferieur (mute in place).
 // @param higher  array<CmiZone> du TF superieur (lecture seule).
 // @returns array<CmiZone> (`lower`).
@@ -407,7 +409,7 @@ export crossTfOverlapPass(array<CmiZone> lower, array<CmiZone> higher) =>
                 bool blocked = false
                 for j = 0 to nHi - 1
                     CmiZone other = array.get(higher, j)
-                    if other.state != CmiState.EXPIRED and overlap(other, cz)
+                    if other.state == CmiState.ACTIVE and overlap(other, cz)
                         blocked := true
                         break
                 if blocked
