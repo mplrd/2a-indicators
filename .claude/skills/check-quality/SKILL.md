@@ -17,8 +17,8 @@ Référence : voir la section "Contraintes TradingView / Pine Script v6" du `CLA
 ### 1. Versioning et déclaration
 - Première ligne : `//@version=6` (refuser v5 ou inférieur).
 - Une seule déclaration `library(...)` OU `indicator(...)` par fichier.
-- `library()` UNIQUEMENT dans les fichiers `lib-*.pine`.
-- `indicator()` UNIQUEMENT dans les fichiers d'indicateurs (pas `lib-*`).
+- `library()` UNIQUEMENT dans les fichiers de `tradingview/libraries/` ; le nom déclaré doit être `lib_X` (ex. `library("lib_price")`).
+- `indicator()` UNIQUEMENT dans les fichiers `tradingview/*.pine` (hors `libraries/`).
 
 ### 2. Séparation lib / indicateur
 - **Libs** ne contiennent PAS :
@@ -34,7 +34,7 @@ Référence : voir la section "Contraintes TradingView / Pine Script v6" du `CLA
 - Types / UDT : `PascalCase`
 - Constantes : `UPPER_SNAKE_CASE`
 - Identifiants et commentaires : **anglais**
-- Fichiers : kebab-case (`lib-price.pine`, `zones-MTF.pine`)
+- Fichiers : kebab-case. Libs : `tradingview/libraries/price.pine` (sans préfixe `lib-`). Indicateurs : `tradingview/zones-MTF.pine`, etc.
 
 ### 4. Inputs
 - Tout `input.*` a un `title` explicite et un `group=` non vide.

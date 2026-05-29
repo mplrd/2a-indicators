@@ -1,0 +1,70 @@
+//@version=6
+// @description lib-time — primitives temporelles : timezones, jours, sessions. Couche 0 (aucune dépendance, ne dessine rien).
+//              Toutes les fonctions horaires acceptent une timezone IANA explicite (ex : "Europe/Paris", "America/New_York", "Asia/Tokyo").
+//              Pas d'offsets bruts (`GMT+1`) — cassés en DST.
+//              NB design : pas de UDT Session — les builtins Pine (`year`, `time(timeframe, session, tz)`)
+//              exigent `simple string` pour leurs args session/tz. Un UDT donne du `series string` au
+//              call site (CE10123). Donc on passe les strings nues partout, c'est volontaire.
+library("lib_time", overlay = true)
+
+// ============================================================
+// Jours
+// ============================================================
+
+// @function Date au format YYYYMMDD pour la barre courante, dans la timezone donnée.
+// @param tz Nom IANA de timezone.
+// @returns int (ex : 20260519).
+export dateInTz(simple string tz) =>
+    year(time, tz) * 10000 + month(time, tz) * 100 + dayofmonth(time, tz)
+
+// @function Vrai si la barre courante est dans un jour différent de la précédente (timezone donnée).
+//           Sur la toute première barre du dataset (pas de barre précédente), retourne `true`.
+// @param tz Nom IANA de timezone.
+// @returns bool
+export isNewDay(simple string tz) =>
+    d = dateInTz(tz)
+    p = d[1]
+    na(p) or d != p
+
+// ============================================================
+// Sessions
+// ============================================================
+
+// @function Vrai si la barre courante est à l'intérieur de la session.
+//           Une barre est "dans la session" si son timestamp d'OUVERTURE l'est.
+// @param sessionStr Plage horaire format "HHMM-HHMM" (ex : "0900-1400").
+// @param tz         Timezone IANA.
+// @returns bool
+export inSession(simple string sessionStr, simple string tz) =>
+    not na(time(timeframe.period, sessionStr, tz))
+
+// @function Timestamp ms de l'ouverture la plus récente de la session.
+//           Mis à jour à chaque transition "hors session → en session".
+//           `na` tant qu'aucune session n'a été observée.
+// @param sessionStr Plage horaire "HHMM-HHMM".
+// @param tz         Timezone IANA.
+// @returns int (ms epoch)
+export sessionStartTime(simple string sessionStr, simple string tz) =>
+    var int t = na
+    var bool wasIn = false
+    inS = not na(time(timeframe.period, sessionStr, tz))
+    if inS and not wasIn
+        t := time
+    wasIn := inS
+    t
+
+// @function Timestamp ms de la fermeture la plus récente de la session.
+//           Mis à jour à chaque transition "en session → hors session".
+//           La fermeture est définie comme l'ouverture de la première barre hors session.
+//           `na` tant qu'aucune session ne s'est terminée.
+// @param sessionStr Plage horaire "HHMM-HHMM".
+// @param tz         Timezone IANA.
+// @returns int (ms epoch)
+export sessionEndTime(simple string sessionStr, simple string tz) =>
+    var int t = na
+    var bool wasIn = false
+    inS = not na(time(timeframe.period, sessionStr, tz))
+    if wasIn and not inS
+        t := time
+    wasIn := inS
+    t

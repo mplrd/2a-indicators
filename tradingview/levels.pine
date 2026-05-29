@@ -1,0 +1,340 @@
+//@version=6
+// @description 2Ai Levels — Niveaux de prix passés (Phase 1 : ATH + niveaux de période précédente PDH/PDL, PWH/PWL, PMH/PML).
+// max_bars_back = 5000 : `draw.drawLevel` reference une barre d'origine dynamique (`x1 = startBar`)
+// jusqu'a 365 barres en arriere. Sans buffer explicite, Pine l'auto-detecte trop court (365) et
+// `line.new` deborde → "requested historical offset beyond buffer limit". 5000 = plafond projet.
+indicator("2Ai Levels", shorttitle = "Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, max_bars_back = 5000)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_levels/12    as levels
+import mpilard/lib_draw/17      as draw
+import mpilard/lib_supertrend/1 as st
+import mpilard/lib_bollinger/4  as bb
+import mpilard/lib_structure/3  as structure
+import mpilard/lib_gap/7        as gap
+
+// TZ d'affichage du chart. Pine v6 n'expose pas la TZ d'affichage, donc on la hardcode pour
+// le projet (Europe/Paris). Contrôle "minuit chart" = quand les sessions/OR reset.
+chartTz = "Europe/Paris"
+
+// ============================================================
+// Inputs
+// ============================================================
+
+var htfGroup       = "Niveaux HTF"
+var structureGroup = "Structure de marché"
+var dynGroup       = "Niveaux dynamiques (Supertrend / BB / MA)"
+var intradayGroup  = "Niveaux Intraday"
+
+// === Niveaux HTF ===
+athEnabled = input.bool(true,                       "ATH", inline = "ath_level", group = htfGroup)
+athColor   = input.color(#8B0000,                   "",    inline = "ath_level", group = htfGroup)
+athStyle   = input.enum(draw.LineStyle.DASHED,      "",    inline = "ath_level", group = htfGroup)
+athWidth   = input.int(2,                           "",    inline = "ath_level", group = htfGroup, minval = 1, maxval = 5)
+
+dailyEnabled = input.bool(true,                     "Daily (PDH/PDL)", inline = "daily_level", group = htfGroup)
+dailyColor   = input.color(#555555,                 "",                inline = "daily_level", group = htfGroup)
+dailyStyle   = input.enum(draw.LineStyle.DASHED,    "",                inline = "daily_level", group = htfGroup)
+dailyWidth   = input.int(2,                         "",                inline = "daily_level", group = htfGroup, minval = 1, maxval = 5)
+
+weeklyEnabled = input.bool(true,                    "Weekly (PWH/PWL)", inline = "weekly_level", group = htfGroup)
+weeklyColor   = input.color(#555555,                "",                 inline = "weekly_level", group = htfGroup)
+weeklyStyle   = input.enum(draw.LineStyle.SOLID,    "",                 inline = "weekly_level", group = htfGroup)
+weeklyWidth   = input.int(2,                        "",                 inline = "weekly_level", group = htfGroup, minval = 1, maxval = 5)
+
+monthlyEnabled = input.bool(true,                   "Monthly (PMH/PML)", inline = "monthly_level", group = htfGroup)
+monthlyColor   = input.color(#555555,               "",                  inline = "monthly_level", group = htfGroup)
+monthlyStyle   = input.enum(draw.LineStyle.SOLID,   "",                  inline = "monthly_level", group = htfGroup)
+monthlyWidth   = input.int(3,                       "",                  inline = "monthly_level", group = htfGroup, minval = 1, maxval = 5)
+
+// === Structure de marché ===
+// Couleurs Bull/Bear partagées (pattern ST), déclarées AVANT la ligne d'activation pour
+// apparaître au-dessus dans la modal.
+ipaBullColor = input.color(color.blue,            "Bull", inline = "ipa_colors", group = structureGroup)
+ipaBearColor = input.color(color.orange,          "Bear", inline = "ipa_colors", group = structureGroup)
+
+ipaEnabled   = input.bool(true,                   "IPA", inline = "ipa", group = structureGroup)
+ipaStyle     = input.enum(draw.LineStyle.DOTTED,  "",    inline = "ipa", group = structureGroup)
+ipaWidth     = input.int(2,                       "",    inline = "ipa", group = structureGroup, minval = 1, maxval = 5)
+
+// Gaps — regroupés ici (à la demande) sur une ligne : activation + couleur + lookback.
+gapsEnabled  = input.bool(true,     "Gaps", inline = "gaps", group = structureGroup)
+gapsColor    = input.color(#CCCCCC, "",     inline = "gaps", group = structureGroup)
+gapsLookback = input.int(50,        "",     inline = "gaps", group = structureGroup, minval = 10, maxval = 500, tooltip = "Historique : nombre de gaps conservés (FIFO).")
+
+// === Supertrend Daily / Weekly ===
+// Couleurs bull/bear partagées entre ST D et ST W ; appliquées dynamiquement selon la direction.
+// Paramètres ATR/Factor du Supertrend hardcodés à 10 / 3.0 (defaults projet).
+stBullColor = input.color(color.green, "Bull", inline = "st_colors", group = dynGroup)
+stBearColor = input.color(color.red,   "Bear", inline = "st_colors", group = dynGroup)
+
+stDEnabled = input.bool(true,                      "Supertrend D", inline = "st_d", group = dynGroup)
+stDStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "st_d", group = dynGroup)
+stDWidth   = input.int(2,                          "",             inline = "st_d", group = dynGroup, minval = 1, maxval = 5)
+
+stWEnabled = input.bool(true,                      "Supertrend W", inline = "st_w", group = dynGroup)
+stWStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "st_w", group = dynGroup)
+stWWidth   = input.int(3,                          "",             inline = "st_w", group = dynGroup, minval = 1, maxval = 5)
+
+// BB Magique flat (length=160, multOuter=2.8) sur H1, H4, D, W (strict < UT cible chacune).
+bbmEnabled = input.bool(true,                      "BB Magique",   inline = "bbm", group = dynGroup)
+bbmStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "bbm", group = dynGroup)
+bbmWidth   = input.int(3,                          "",             inline = "bbm", group = dynGroup, minval = 1, maxval = 5)
+
+// BB Classique flat (length=20, multOuter=2.5) sur H4, D, W (strict < UT cible chacune).
+bbcEnabled = input.bool(true,                      "BB Classique", inline = "bbc", group = dynGroup)
+bbcStyle   = input.enum(draw.LineStyle.SOLID,      "",             inline = "bbc", group = dynGroup)
+bbcWidth   = input.int(2,                          "",             inline = "bbc", group = dynGroup, minval = 1, maxval = 5)
+
+// MA 50 et MA 200 sur D et W (toujours affichées, pas de condition flat).
+ma50Enabled  = input.bool(true,                      "MA 50",  inline = "ma50",  group = dynGroup)
+ma50Style    = input.enum(draw.LineStyle.SOLID,      "",       inline = "ma50",  group = dynGroup)
+ma50Width    = input.int(2,                          "",       inline = "ma50",  group = dynGroup, minval = 1, maxval = 5)
+
+ma200Enabled = input.bool(true,                      "MA 200", inline = "ma200", group = dynGroup)
+ma200Style   = input.enum(draw.LineStyle.SOLID,      "",       inline = "ma200", group = dynGroup)
+ma200Width   = input.int(2,                          "",       inline = "ma200", group = dynGroup, minval = 1, maxval = 5)
+
+// === Niveaux Intraday ===
+// Sessions
+asianEnabled = input.bool(true,                      "Session Asiatique",  inline = "asian_session",  group = intradayGroup)
+asianColor   = input.color(color.orange,             "",                   inline = "asian_session",  group = intradayGroup)
+asianStyle   = input.enum(draw.LineStyle.DASHED,     "",                   inline = "asian_session",  group = intradayGroup)
+asianWidth   = input.int(2,                          "",                   inline = "asian_session",  group = intradayGroup, minval = 1, maxval = 5)
+
+euEnabled = input.bool(true,                         "Session Européenne", inline = "eu_session",     group = intradayGroup)
+euColor   = input.color(color.blue,                  "",                   inline = "eu_session",     group = intradayGroup)
+euStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "eu_session",     group = intradayGroup)
+euWidth   = input.int(2,                             "",                   inline = "eu_session",     group = intradayGroup, minval = 1, maxval = 5)
+
+usEnabled = input.bool(true,                         "Session Américaine", inline = "us_session",     group = intradayGroup)
+usColor   = input.color(color.purple,                "",                   inline = "us_session",     group = intradayGroup)
+usStyle   = input.enum(draw.LineStyle.DASHED,        "",                   inline = "us_session",     group = intradayGroup)
+usWidth   = input.int(2,                             "",                   inline = "us_session",     group = intradayGroup, minval = 1, maxval = 5)
+
+// Open Range + Opens
+orEnabled = input.bool(true,                         "Open Range",         inline = "or_level",       group = intradayGroup)
+orColor   = input.color(#000000,                     "",                   inline = "or_level",       group = intradayGroup)
+orStyle   = input.enum(draw.LineStyle.DOTTED,        "",                   inline = "or_level",       group = intradayGroup)
+orWidth   = input.int(2,                             "",                   inline = "or_level",       group = intradayGroup, minval = 1, maxval = 5)
+
+openFutureEnabled = input.bool(false,                 "Open Future",        inline = "open_future",    group = intradayGroup)
+openFutureColor   = input.color(#555555,              "",                   inline = "open_future",    group = intradayGroup)
+openFutureStyle   = input.enum(draw.LineStyle.DOTTED, "",                   inline = "open_future",    group = intradayGroup)
+openFutureWidth   = input.int(1,                      "",                   inline = "open_future",    group = intradayGroup, minval = 1, maxval = 5)
+
+openEUEnabled = input.bool(false,                     "Open EU",            inline = "open_eu",        group = intradayGroup)
+openEUColor   = input.color(color.blue,               "",                   inline = "open_eu",        group = intradayGroup)
+openEUStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_eu",        group = intradayGroup)
+openEUWidth   = input.int(1,                          "",                   inline = "open_eu",        group = intradayGroup, minval = 1, maxval = 5)
+
+openUSEnabled = input.bool(false,                     "Open US",            inline = "open_us",        group = intradayGroup)
+openUSColor   = input.color(color.purple,             "",                   inline = "open_us",        group = intradayGroup)
+openUSStyle   = input.enum(draw.LineStyle.DOTTED,     "",                   inline = "open_us",        group = intradayGroup)
+openUSWidth   = input.int(1,                          "",                   inline = "open_us",        group = intradayGroup, minval = 1, maxval = 5)
+
+// --- Paramètres des Sessions ---
+var sessionParamsGroup = "Paramètres des Sessions"
+asianSessionStr  = input.session("0800-1400",     "Asiatique",  inline = "asian_params",  group = sessionParamsGroup)
+asianTz          = input.string("Asia/Tokyo",     "",           inline = "asian_params",  group = sessionParamsGroup)
+euSessionStr     = input.session("0900-1400",     "Européenne", inline = "eu_params",     group = sessionParamsGroup)
+euTz             = input.string("Europe/Paris",   "",           inline = "eu_params",     group = sessionParamsGroup)
+usSessionStr     = input.session("0930-1600",     "Américaine", inline = "us_params",     group = sessionParamsGroup)
+usTz             = input.string("America/New_York","",          inline = "us_params",     group = sessionParamsGroup)
+futureSessionStr = input.session("0800-0900",     "Future open",inline = "future_params", group = sessionParamsGroup)
+futureTz         = input.string("Europe/Paris",   "",           inline = "future_params", group = sessionParamsGroup)
+
+// === Paramètres globaux === (déclaré en dernier → affiché tout en bas de la modal TV)
+var globalsGroup = "Paramètres globaux"
+showLabels    = input.bool(true,   "Afficher les labels", group = globalsGroup)
+flatPeriod    = input.int(2,       "Période flat",        inline = "flat_params", group = globalsGroup, minval = 1,     maxval = 20)
+flatThreshold = input.float(0.015, "Seuil flat %",        inline = "flat_params", group = globalsGroup, minval = 0.001, maxval = 1.0, step = 0.001)
+ipaPivotN     = input.int(3,       "Pivot IPA",             inline = "ipa_params",  group = globalsGroup, minval = 1,     maxval = 50)
+ipaMaxN       = input.int(25,      "Max IPA",             inline = "ipa_params",  group = globalsGroup, minval = 1,     maxval = 200)
+
+// ============================================================
+// Filtres TF d'affichage
+// Règle : un niveau d'une période donnée s'affiche uniquement si la TF courante est <= à cette période.
+// Sessions : intraday uniquement (timeframe.isintraday).
+// ============================================================
+tfSec       = timeframe.in_seconds()
+showDaily   = tfSec <= timeframe.in_seconds("D")
+showWeekly  = tfSec <= timeframe.in_seconds("W")
+showMonthly = tfSec <= timeframe.in_seconds("M")
+// Supertrend D/W : strict < D / strict < W (Layout affiche le ST sur leur propre UT, on ne
+// double pas comme niveau là-bas).
+showSTD = tfSec < timeframe.in_seconds("D")
+showSTW = tfSec < timeframe.in_seconds("W")
+// BB flat : strict < TF cible (idem : on évite de doubler avec Layout sur l'UT propre).
+showBBmH1 = tfSec < timeframe.in_seconds("60")
+showBBmH4 = tfSec < timeframe.in_seconds("240")
+showBBmD  = tfSec < timeframe.in_seconds("D")
+showBBmW  = tfSec < timeframe.in_seconds("W")
+showBBcH4 = tfSec < timeframe.in_seconds("240")
+showBBcD  = tfSec < timeframe.in_seconds("D")
+showBBcW  = tfSec < timeframe.in_seconds("W")
+// MA D/W : strict < D / W (toujours, pas de condition flat).
+showMA_D  = tfSec < timeframe.in_seconds("D")
+showMA_W  = tfSec < timeframe.in_seconds("W")
+// Niveaux intraday (sessions, opens, open range) : strict < H1 (M1 à M30).
+showIntraday = tfSec < 3600
+
+// ============================================================
+// Calculs des niveaux
+// ============================================================
+[pdH, pdL] = levels.previousPeriodHL("D")
+[pwH, pwL] = levels.previousPeriodHL("W")
+[pmH, pmL] = levels.previousPeriodHL("M")
+
+pdStartBar = levels.previousPeriodStartBar("D")
+pwStartBar = levels.previousPeriodStartBar("W")
+pmStartBar = levels.previousPeriodStartBar("M")
+
+[athValue, athBar, athBarFound] = levels.ath()
+
+// Gaps journaliers — `gap.update(maxLookback)` orchestre detection (via request.security daily) +
+// cycle de vie (création on day-change + checkFill par barre + FIFO). Tout le métier vit dans
+// `lib_gap` (v7 — UDT Gap + update). L'indicateur n'a plus qu'à itérer le résultat pour rendre.
+gaps = gap.update(gapsLookback)
+
+// Supertrend Daily / Weekly. ATR/Factor hardcodés (10, 3.0). Direction colore la ligne (bull/bear).
+// `isHigh` du label reste hardcoded `false` (Pine n'autorise pas `simple bool` dérivé de `series`).
+[stDVal, stDDir] = request.security(syminfo.tickerid, "D", st.run(10, 3.0), lookahead = barmerge.lookahead_on)
+[stWVal, stWDir] = request.security(syminfo.tickerid, "W", st.run(10, 3.0), lookahead = barmerge.lookahead_on)
+stDActiveColor = stDDir > 0 ? stBullColor : stBearColor
+stWActiveColor = stWDir > 0 ? stBullColor : stBearColor
+
+// BB Magique (length=160, multInner=2.5, multOuter=2.8) sur H1/H4/D/W. Une bande "compte" si elle
+// est plate OU en fermeture — délégué à `bb.bHtfLevels(close, length, multInner, multOuter, flatLen, flatThr)`.
+[bbmH1U, bbmH1L, bbmH1UDraw, bbmH1LDraw] = request.security(syminfo.tickerid, "60",  bb.bHtfLevels(close, 160, 2.5, 2.8, flatPeriod, flatThreshold))
+[bbmH4U, bbmH4L, bbmH4UDraw, bbmH4LDraw] = request.security(syminfo.tickerid, "240", bb.bHtfLevels(close, 160, 2.5, 2.8, flatPeriod, flatThreshold))
+[bbmDU,  bbmDL,  bbmDUDraw,  bbmDLDraw]  = request.security(syminfo.tickerid, "D",   bb.bHtfLevels(close, 160, 2.5, 2.8, flatPeriod, flatThreshold))
+[bbmWU,  bbmWL,  bbmWUDraw,  bbmWLDraw]  = request.security(syminfo.tickerid, "W",   bb.bHtfLevels(close, 160, 2.5, 2.8, flatPeriod, flatThreshold))
+
+// BB Classique (length=20, multInner=2.0, multOuter=2.5) sur H4/D/W.
+[bbcH4U, bbcH4L, bbcH4UDraw, bbcH4LDraw] = request.security(syminfo.tickerid, "240", bb.bHtfLevels(close, 20, 2.0, 2.5, flatPeriod, flatThreshold))
+[bbcDU,  bbcDL,  bbcDUDraw,  bbcDLDraw]  = request.security(syminfo.tickerid, "D",   bb.bHtfLevels(close, 20, 2.0, 2.5, flatPeriod, flatThreshold))
+[bbcWU,  bbcWL,  bbcWUDraw,  bbcWLDraw]  = request.security(syminfo.tickerid, "W",   bb.bHtfLevels(close, 20, 2.0, 2.5, flatPeriod, flatThreshold))
+
+// MA 50 et MA 200 sur D et W.
+ma50D  = request.security(syminfo.tickerid, "D", ta.sma(close, 50))
+ma50W  = request.security(syminfo.tickerid, "W", ta.sma(close, 50))
+ma200D = request.security(syminfo.tickerid, "D", ta.sma(close, 200))
+ma200W = request.security(syminfo.tickerid, "W", ta.sma(close, 200))
+
+// Sessions H/L — visibles toute la journée chart, reset à minuit chart (00h Paris).
+[asianH, asianL, asianStart, asianEnd, asianSeen, asianInS] = levels.sessionHL(asianSessionStr, asianTz, chartTz)
+[euH,    euL,    euStart,    euEnd,    euSeen,    euInS]    = levels.sessionHL(euSessionStr,    euTz,    chartTz)
+[usH,    usL,    usStart,    usEnd,    usSeen,    usInS]    = levels.sessionHL(usSessionStr,    usTz,    chartTz)
+
+// Opens par session.
+[asianOpen,  asianOpenTime,  asianOpenSeen]  = levels.sessionOpen(asianSessionStr,  asianTz,    chartTz)
+[euOpen,     euOpenTime,     euOpenSeen]     = levels.sessionOpen(euSessionStr,     euTz,       chartTz)
+[usOpen,     usOpenTime,     usOpenSeen]     = levels.sessionOpen(usSessionStr,     usTz,       chartTz)
+[futureOpen, futureOpenTime, futureOpenSeen] = levels.sessionOpen(futureSessionStr, futureTz,   chartTz)
+[_futureH, _futureL, _futureStart, futureEnd, _futureSeen, futureInS] = levels.sessionHL(futureSessionStr, futureTz, chartTz)
+
+// Open Range — H/L des 60 premières minutes du jour chart (TZ chart hardcodée Europe/Paris).
+[orH, orL, orStart, orEnd, _orSeen] = levels.openRange(chartTz)
+
+// IPA — Structure de marché (TF courante, recompilée à chaque barre).
+// Lifecycle complet (détection pivots + pending + breaks + retests + anti-amas + FIFO) dans la lib.
+var array<structure.IPA> ipas = array.new<structure.IPA>()
+structure.updateIPAs(ipas, ipaPivotN, ipaMaxN)
+
+// ============================================================
+// Rendu — refresh à chaque tick sur la dernière barre.
+// Dessin entièrement délégué à `lib_draw` (Couche 2). L'indicateur n'orchestre que.
+// ============================================================
+var array<line>  lineArr   = array.new<line>()
+var array<label> labelArr  = array.new<label>()
+var array<box>   gapBoxArr = array.new<box>()  // gaps : redraw stateless chaque islast
+
+if barstate.islast
+    draw.clearLines(lineArr)
+    draw.clearLabels(labelArr)
+    draw.clearBoxes(gapBoxArr)
+
+    // Gaps : itération + délégation à draw.drawGapBox.
+    for g in gaps
+        draw.drawGapBox(gapsEnabled, g.leftBarIndex, g.top, g.bottom, gapsColor, 85, gapBoxArr)
+
+    // ATH (toujours TF-allowed)
+    draw.drawLevel(athEnabled, athValue, athBar, athBarFound, athColor, athWidth, athStyle, "ATH", showLabels, true, lineArr, labelArr)
+
+    // PDH / PDL
+    draw.drawLevel(dailyEnabled and showDaily, pdH, pdStartBar, not na(pdStartBar), dailyColor, dailyWidth, dailyStyle, "PDH", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(dailyEnabled and showDaily, pdL, pdStartBar, not na(pdStartBar), dailyColor, dailyWidth, dailyStyle, "PDL", showLabels, false, lineArr, labelArr)
+
+    // PWH / PWL
+    draw.drawLevel(weeklyEnabled and showWeekly, pwH, pwStartBar, not na(pwStartBar), weeklyColor, weeklyWidth, weeklyStyle, "PWH", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(weeklyEnabled and showWeekly, pwL, pwStartBar, not na(pwStartBar), weeklyColor, weeklyWidth, weeklyStyle, "PWL", showLabels, false, lineArr, labelArr)
+
+    // PMH / PML
+    draw.drawLevel(monthlyEnabled and showMonthly, pmH, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PMH", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, false, lineArr, labelArr)
+
+    // IPA — Structure de marché : ray depuis le pivot, couleur dynamique Bull/Bear selon
+    // position vs prix. `drawLevel.isHigh` est `simple bool` → 2 appels mutuellement exclusifs.
+    for ipa in ipas
+        if ipa.broken
+            above = ipa.price > close
+            col   = above ? ipaBearColor : ipaBullColor
+            draw.drawLevel(ipaEnabled and above,       ipa.price, ipa.bar, true, col, ipaWidth, ipaStyle, "", false, true,  lineArr, labelArr)
+            draw.drawLevel(ipaEnabled and (not above), ipa.price, ipa.bar, true, col, ipaWidth, ipaStyle, "", false, false, lineArr, labelArr)
+
+    // Supertrend D / W — couleur dynamique selon direction (bull/bear). Strict < D / W.
+    // Position du label adaptative : niveau au-dessus du prix → label au-dessus (isHigh=true) ;
+    // niveau en-dessous → label en-dessous (isHigh=false). Pine n'accepte pas un `simple bool`
+    // dérivé d'une `series` → 2 appels mutuellement exclusifs via `show`.
+    stDAbovePrice = stDVal > close
+    stWAbovePrice = stWVal > close
+    draw.drawLevel(stDEnabled and showSTD and stDAbovePrice,       stDVal, na, false, stDActiveColor, stDWidth, stDStyle, "ST D", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(stDEnabled and showSTD and (not stDAbovePrice), stDVal, na, false, stDActiveColor, stDWidth, stDStyle, "ST D", showLabels, false, lineArr, labelArr)
+    draw.drawLevel(stWEnabled and showSTW and stWAbovePrice,       stWVal, na, false, stWActiveColor, stWWidth, stWStyle, "ST W", showLabels, true,  lineArr, labelArr)
+    draw.drawLevel(stWEnabled and showSTW and (not stWAbovePrice), stWVal, na, false, stWActiveColor, stWWidth, stWStyle, "ST W", showLabels, false, lineArr, labelArr)
+
+    // BB Magique flat-ou-closing sur H1/H4/D/W — un niveau par bande (outer upper + outer lower).
+    draw.drawDynamicLevel(bbmEnabled and showBBmH1 and bbmH1UDraw, bbmH1U, stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M H1", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmH1 and bbmH1LDraw, bbmH1L, stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M H1", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmH4 and bbmH4UDraw, bbmH4U, stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M H4", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmH4 and bbmH4LDraw, bbmH4L, stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M H4", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmD  and bbmDUDraw,  bbmDU,  stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M D",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmD  and bbmDLDraw,  bbmDL,  stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M D",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmW  and bbmWUDraw,  bbmWU,  stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M W",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbmEnabled and showBBmW  and bbmWLDraw,  bbmWL,  stBullColor, stBearColor, bbmWidth, bbmStyle, "BB M W",  showLabels, lineArr, labelArr)
+
+    // BB Classique flat-ou-closing sur H4/D/W.
+    draw.drawDynamicLevel(bbcEnabled and showBBcH4 and bbcH4UDraw, bbcH4U, stBullColor, stBearColor, bbcWidth, bbcStyle, "BB H4", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbcEnabled and showBBcH4 and bbcH4LDraw, bbcH4L, stBullColor, stBearColor, bbcWidth, bbcStyle, "BB H4", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbcEnabled and showBBcD  and bbcDUDraw,  bbcDU,  stBullColor, stBearColor, bbcWidth, bbcStyle, "BB D",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbcEnabled and showBBcD  and bbcDLDraw,  bbcDL,  stBullColor, stBearColor, bbcWidth, bbcStyle, "BB D",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbcEnabled and showBBcW  and bbcWUDraw,  bbcWU,  stBullColor, stBearColor, bbcWidth, bbcStyle, "BB W",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(bbcEnabled and showBBcW  and bbcWLDraw,  bbcWL,  stBullColor, stBearColor, bbcWidth, bbcStyle, "BB W",  showLabels, lineArr, labelArr)
+
+    // MA 50 et MA 200 sur D et W.
+    draw.drawDynamicLevel(ma50Enabled  and showMA_D, ma50D,  stBullColor, stBearColor, ma50Width,  ma50Style,  "MA 50 D",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(ma50Enabled  and showMA_W, ma50W,  stBullColor, stBearColor, ma50Width,  ma50Style,  "MA 50 W",  showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(ma200Enabled and showMA_D, ma200D, stBullColor, stBearColor, ma200Width, ma200Style, "MA 200 D", showLabels, lineArr, labelArr)
+    draw.drawDynamicLevel(ma200Enabled and showMA_W, ma200W, stBullColor, stBearColor, ma200Width, ma200Style, "MA 200 W", showLabels, lineArr, labelArr)
+
+    // Sessions H/L (intraday strict < H1). Bornées à sEnd connue dès le début de session
+    // (parsing du sessionStr côté lib) → plus d'extend.right pendant la session.
+    draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianH, asianStart, asianEnd, false, asianColor, asianWidth, asianStyle, "Asian H", showLabels, true,  lineArr, labelArr)
+    draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianL, asianStart, asianEnd, false, asianColor, asianWidth, asianStyle, "Asian L", showLabels, false, lineArr, labelArr)
+    draw.drawSessionLevel(euEnabled    and showIntraday and euSeen,    euH,    euStart,    euEnd,    false, euColor,    euWidth,    euStyle,    "EU H",    showLabels, true,  lineArr, labelArr)
+    draw.drawSessionLevel(euEnabled    and showIntraday and euSeen,    euL,    euStart,    euEnd,    false, euColor,    euWidth,    euStyle,    "EU L",    showLabels, false, lineArr, labelArr)
+    draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usH,    usStart,    usEnd,    false, usColor,    usWidth,    usStyle,    "US H",    showLabels, true,  lineArr, labelArr)
+    draw.drawSessionLevel(usEnabled    and showIntraday and usSeen,    usL,    usStart,    usEnd,    false, usColor,    usWidth,    usStyle,    "US L",    showLabels, false, lineArr, labelArr)
+
+    // Opens : ligne extend.right (ongoing=true) — visible toute la journée chart, reset à minuit chart.
+    draw.drawSessionLevel(openFutureEnabled and showIntraday and futureOpenSeen, futureOpen, futureOpenTime, futureEnd, true, openFutureColor, openFutureWidth, openFutureStyle, "Open Future", showLabels, true, lineArr, labelArr)
+    draw.drawSessionLevel(openEUEnabled     and showIntraday and euOpenSeen,     euOpen,     euOpenTime,     euEnd,     true, openEUColor,     openEUWidth,     openEUStyle,     "Open EU",     showLabels, true, lineArr, labelArr)
+    draw.drawSessionLevel(openUSEnabled     and showIntraday and usOpenSeen,     usOpen,     usOpenTime,     usEnd,     true, openUSColor,     openUSWidth,     openUSStyle,     "Open US",     showLabels, true, lineArr, labelArr)
+
+    // Open Range : H/L figés après 60min, mais la LIGNE persiste toute la journée chart
+    // (extend.right, ongoing=true). Au prochain minuit chart, openRange() ré-init.
+    draw.drawSessionLevel(orEnabled and showIntraday, orH, orStart, orEnd, true, orColor, orWidth, orStyle, "OR H", showLabels, true,  lineArr, labelArr)
+    draw.drawSessionLevel(orEnabled and showIntraday, orL, orStart, orEnd, true, orColor, orWidth, orStyle, "OR L", showLabels, false, lineArr, labelArr)

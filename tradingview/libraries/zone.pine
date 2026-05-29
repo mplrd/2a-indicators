@@ -1,0 +1,141 @@
+//@version=6
+// @description lib-zone — UDT Zone et helpers (chevauchement, contains, cycle de vie, FIFO). Couche 0 (aucune dépendance, ne dessine rien).
+//              Représente une zone de prix horizontale avec un état de cycle de vie. Consommée par lib-signal, lib-fvg, lib-draw (drawZone).
+library("lib_zone", overlay = true)
+
+// ============================================================
+// Types
+// ============================================================
+
+// @enum ZoneSide — orientation logique d'une zone.
+export enum ZoneSide
+    BULL
+    BEAR
+
+// @enum ZoneState — état du cycle de vie d'une zone.
+//        - ACTIVE  : zone affichable et impactée par les events de marché.
+//        - PENDING : zone validée mais en attente (chevauchement avec une zone existante, etc.).
+//        - EXPIRED : zone à supprimer au prochain nettoyage.
+export enum ZoneState
+    ACTIVE
+    PENDING
+    EXPIRED
+
+// @type Zone — Zone de prix horizontale avec horizon temporel et cycle de vie.
+// @field top       Borne supérieure (prix).
+// @field bottom    Borne inférieure (prix).
+// @field leftTime  Timestamp ms du point de départ temporel de la zone.
+// @field side      ZoneSide.BULL ou ZoneSide.BEAR.
+// @field state     ZoneState.ACTIVE / PENDING / EXPIRED.
+// @field tfMinutes Timeframe d'origine en minutes. Utile pour le filtrage MTF.
+export type Zone
+    float     top
+    float     bottom
+    int       leftTime
+    ZoneSide  side
+    ZoneState state
+    int       tfMinutes
+
+// ============================================================
+// Constructeurs
+// ============================================================
+
+// @function Crée une nouvelle zone active.
+// @param top       Borne haute.
+// @param bottom    Borne basse.
+// @param leftTime  Timestamp ms de début.
+// @param side      ZoneSide.BULL | ZoneSide.BEAR.
+// @param tfMinutes Timeframe d'origine en minutes.
+// @returns Zone (état ACTIVE).
+export newZone(float top, float bottom, int leftTime, ZoneSide side, int tfMinutes) =>
+    Zone.new(top, bottom, leftTime, side, ZoneState.ACTIVE, tfMinutes)
+
+// ============================================================
+// Helpers géométriques
+// ============================================================
+
+// @function Vrai si deux zones se chevauchent verticalement (axe des prix).
+//           N'inspecte ni le `leftTime` ni l'état.
+export overlap(Zone a, Zone b) =>
+    not (a.top < b.bottom or a.bottom > b.top)
+
+// @function Vrai si un prix est contenu dans la zone (inclusif).
+export contains(Zone z, float price) =>
+    price >= z.bottom and price <= z.top
+
+// @function Hauteur de la zone (prix haut - prix bas).
+export height(Zone z) =>
+    z.top - z.bottom
+
+// ============================================================
+// Cycle de vie
+// ============================================================
+
+// @function Marque la zone comme expirée (à supprimer au prochain nettoyage). Mutation in-place.
+export expire(Zone z) =>
+    z.state := ZoneState.EXPIRED
+    z
+
+// @function Marque la zone comme pending (en attente d'activation). Mutation in-place.
+export setPending(Zone z) =>
+    z.state := ZoneState.PENDING
+    z
+
+// @function Marque la zone comme active. Mutation in-place.
+export activate(Zone z) =>
+    z.state := ZoneState.ACTIVE
+    z
+
+export isActive(Zone z)  => z.state == ZoneState.ACTIVE
+export isPending(Zone z) => z.state == ZoneState.PENDING
+export isExpired(Zone z) => z.state == ZoneState.EXPIRED
+
+// ============================================================
+// Helpers sur arrays<Zone>
+// ============================================================
+
+// @function Supprime les zones expirées d'un array (parcours arrière, mutation in-place).
+// @returns L'array d'entrée (par commodité de chaînage).
+export removeExpired(array<Zone> zones) =>
+    n = array.size(zones)
+    if n > 0
+        for i = n - 1 to 0
+            z = array.get(zones, i)
+            if z.state == ZoneState.EXPIRED
+                array.remove(zones, i)
+    zones
+
+// @function Garde au plus `maxCount` zones, en supprimant les plus anciennes (FIFO basé sur l'ordre d'insertion).
+// @returns L'array d'entrée.
+export trimOldest(array<Zone> zones, simple int maxCount) =>
+    while array.size(zones) > maxCount
+        array.shift(zones)
+    zones
+
+// @function Trouve la première zone active de `zones` qui chevauche `z`, ou `na` sinon.
+// @returns Zone | na
+export findOverlapping(array<Zone> zones, Zone z) =>
+    Zone result = na
+    n = array.size(zones)
+    if n > 0
+        for i = 0 to n - 1
+            candidate = array.get(zones, i)
+            if candidate.state == ZoneState.ACTIVE and overlap(candidate, z)
+                result := candidate
+                break
+    result
+
+// @function Vrai s'il existe au moins une zone ACTIVE de MÊME `side` que `z` qui la chevauche
+//           en prix. Sert au filtre "5 étoiles" de `2Ai Zones` (S/D et FVG du même côté
+//           superposés). Variante booléenne de `findOverlapping`, restreinte au même side.
+// @returns bool
+export findOverlappingActiveSameSide(array<Zone> zones, Zone z) =>
+    found = false
+    n = array.size(zones)
+    if n > 0
+        for i = 0 to n - 1
+            other = array.get(zones, i)
+            if other.state == ZoneState.ACTIVE and other.side == z.side and overlap(other, z)
+                found := true
+                break
+    found

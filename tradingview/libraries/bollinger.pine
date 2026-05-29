@@ -1,0 +1,97 @@
+//@version=6
+// @description lib-bollinger — Bandes de Bollinger avec multiplicateurs interne et externe. Couche 1 (calculs purs, ne dessine rien).
+library("lib_bollinger", overlay = true)
+
+import mpilard/lib_series/3 as series
+
+// ============================================================
+// Bandes
+// ============================================================
+
+// @function Calcule des bandes de Bollinger inner+outer à partir d'une SMA et d'un écart-type.
+//           Détection de l'état (plate / fermeture) volontairement hors scope : déléguée à lib-series
+//           (slopePercent / isFlatSeries / isClosingSeries) qui s'applique à n'importe quelle série.
+// @param src       Série source (typiquement close).
+// @param length    Période SMA.
+// @param multInner Multiplicateur d'écart-type pour la bande interne.
+// @param multOuter Multiplicateur d'écart-type pour la bande externe (≥ multInner).
+// @returns Tuple [basis, innerUpper, innerLower, outerUpper, outerLower].
+export bands(
+  series float src,
+  simple int   length,
+  simple float multInner,
+  simple float multOuter) =>
+    basis = ta.sma(src, length)
+    dev   = ta.stdev(src, length)
+    iU    = basis + multInner * dev
+    iL    = basis - multInner * dev
+    oU    = basis + multOuter * dev
+    oL    = basis - multOuter * dev
+    [basis, iU, iL, oU, oL]
+
+// ============================================================
+// Projection
+// ============================================================
+
+// @function Projette les bandes de Bollinger `barsAhead` barres dans le futur, sous l'hypothèse
+//           que `src` reste constant à sa valeur courante.
+//           - Basis : projection exacte via `series.projectMean()`.
+//           - Stdev : approximation par la valeur courante (impact marginal pour barsAhead ∈ [1, 5]).
+// @param src       Série source.
+// @param length    Période SMA.
+// @param multInner Multiplicateur d'écart-type inner.
+// @param multOuter Multiplicateur d'écart-type outer.
+// @param barsAhead Nombre de barres à projeter (1, 2, 3, ...).
+// @returns Tuple [basis, innerUpper, innerLower, outerUpper, outerLower] projetés.
+export projectBands(
+  series float src,
+  simple int   length,
+  simple float multInner,
+  simple float multOuter,
+  simple int   barsAhead) =>
+    basis = series.projectMean(src, length, barsAhead)
+    dev   = ta.stdev(src, length)
+    iU    = basis + multInner * dev
+    iL    = basis - multInner * dev
+    oU    = basis + multOuter * dev
+    oL    = basis - multOuter * dev
+    [basis, iU, iL, oU, oL]
+
+// ============================================================
+// Bandes HTF "à dessiner" (plate ou en fermeture)
+// ============================================================
+
+// @function Calcule les bandes outer + le drapeau "à dessiner" (plate OU en fermeture) pour le
+//           haut et le bas. Sort les helpers locaux `bbmHtfLevels` / `bbcHtfLevels` dupliqués de
+//           levels.pine — le même comportement, paramétré par `length` / `multInner` / `multOuter`
+//           (BB Magique : 160/2.5/2.8, BB Classique : 20/2.0/2.5, défauts projet).
+//
+//           Une bande "compte" si elle est plate (`series.isFlatSeries`) OU en fermeture
+//           (`series.isClosingSeries`) — mêmes critères que la coloration accent dans `layout.pine`,
+//           garantit qu'on ne trace que des bandes non-expansives.
+//
+//           Hoist explicite des appels `isClosingSeries` hors du `or` côté lib : Pine court-circuite
+//           `or` (`CW10002`), or `isClosingSeries` est dépendant de l'historique et doit s'exécuter
+//           à chaque barre.
+// @param src       Série source (typiquement close).
+// @param length    Période SMA.
+// @param multInner Multiplicateur d'écart-type inner.
+// @param multOuter Multiplicateur d'écart-type outer.
+// @param flatLen   Période pour évaluer la planéité (slope sur `flatLen` barres).
+// @param flatThr   Seuil de planéité (% absolu).
+// @returns [outerUpper, outerLower, drawUpper, drawLower].
+export bHtfLevels(
+  series float src,
+  simple int   length,
+  simple float multInner,
+  simple float multOuter,
+  simple int   flatLen,
+  simple float flatThr) =>
+    [_b, _iU, _iL, oU, oL] = bands(src, length, multInner, multOuter)
+    flatU    = series.isFlatSeries(oU, flatLen, flatThr)
+    closingU = series.isClosingSeries(oU, flatLen, flatThr, true)
+    flatL    = series.isFlatSeries(oL, flatLen, flatThr)
+    closingL = series.isClosingSeries(oL, flatLen, flatThr, false)
+    drawU = flatU or closingU
+    drawL = flatL or closingL
+    [oU, oL, drawU, drawL]

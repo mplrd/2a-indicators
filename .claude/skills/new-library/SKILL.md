@@ -1,27 +1,28 @@
 ---
 name: new-library
-description: Scaffold a new Pine Script v6 shared library for TradingView (lib-xxx.pine). Use when the user asks to create, add, or scaffold a new shared library, helper module, or domain library for the indicators project.
+description: Scaffold a new Pine Script v6 shared library for TradingView (tradingview/libraries/xxx.pine). Use when the user asks to create, add, or scaffold a new shared library, helper module, or domain library for the indicators project.
 argument-hint: "[lib-name]"
 allowed-tools: "Read, Write, Edit, Grep, Glob"
 ---
 
 # New Pine v6 Library Scaffold (TradingView)
 
-Create the Pine Script v6 library **lib-$ARGUMENTS.pine** in `tradingview/`.
+Create the Pine Script v6 library **$ARGUMENTS.pine** in `tradingview/libraries/` (the `lib-` filename prefix has been dropped — it's redundant with the folder ; the published name reste `lib_$ARGUMENTS` via `library("lib_$ARGUMENTS")`).
 
 Référence des contraintes plateforme : voir la section "Contraintes TradingView / Pine Script v6" du `CLAUDE.md` racine.
 
 ## Steps
 
 1. **Check naming**
-   - File name MUST start with `lib-` and use kebab-case: `lib-price.pine`, `lib-hours.pine`, `lib-drawing.pine`, etc.
+   - File name in `tradingview/libraries/` uses kebab-case **without** the `lib-` prefix : `price.pine`, `hours.pine`, `drawing.pine`, `cmi-zone.pine`, etc. (le préfixe `lib-` est redondant avec le dossier).
+   - Le nom **publié** sur TradingView garde le préfixe : `library("lib_price")` → import `mpilard/lib_price/N`.
    - The name should represent a clear **business domain** (price, hours, drawing, session, level…), not an indicator name.
 
 2. **Read SPECIFICATIONS.md**
    - Identify which calculations or primitives belong to this domain.
    - If the domain isn't clearly defined in specs, ask the user before scaffolding.
 
-3. **Create the file** in `tradingview/lib-$ARGUMENTS.pine` with this skeleton:
+3. **Create the file** in `tradingview/libraries/$ARGUMENTS.pine` with this skeleton:
    ```pinescript
    //@version=6
    // @description <one-line French description of the library's purpose>

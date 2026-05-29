@@ -9,7 +9,7 @@ Specs complètes dans `docs/SPECIFICATIONS.md`.
 - **Langage**: Pine Script v6 (`//@version=6`)
 - **Plateforme actuelle**: TradingView
 - **Cibles futures**: cTrader, MetaTrader (MQL5), ProRealTime
-- **Code source**: `tradingview/*.pine`
+- **Code source** : `tradingview/*.pine` (indicateurs) + `tradingview/libraries/*.pine` (libs partagées)
 - **Specs**: `docs/SPECIFICATIONS.md` (référence unique du comportement attendu)
 - **Documentation feature**: `docs/<feature>.md` (français)
 
@@ -20,36 +20,44 @@ Découpage en **3 couches**. Objectif : qu'une stratégie (à venir) puisse impo
 ```
 indicators/
 ├── tradingview/
-│   │  --- Couche 0 : fondations (types & utils) ---
-│   ├── lib-time.pine        # Timezones, isNewDay, sessions, sessionStart/End, isFirstH1OfDay
-│   ├── lib-market.pine      # Détection cashEU / cashUS / cashAsia / nonCash         (dep: lib-time)
-│   ├── lib-zone.pine        # UDT Zone, overlap, contains, expired, helpers FIFO
-│   │
-│   │  --- Couche 1 : signaux & calculs purs (importable par les stratégies) ---
-│   ├── lib-ma.pine          # SMA, slope%, isFlatSeries, ribbon (SMA ± std)
-│   ├── lib-bollinger.pine   # BB inner/outer, bandState (open/flat/closing)         (dep: lib-ma)
-│   ├── lib-ichimoku.pine    # Tenkan / Kijun / Senkou A&B / Chikou
-│   ├── lib-supertrend.pine  # Line + dir normalisée ±1
-│   ├── lib-cmi.pine         # Signal bull/bear, validation 3 bougies, construit Zone (dep: lib-zone)
-│   ├── lib-fvg.pine         # Signal, niveaux, comblement, retourne une Zone        (dep: lib-zone)
-│   ├── lib-gap.pine         # Détection gap daily + cycle de vie                    (dep: lib-time)
-│   ├── lib-levels.pine      # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, IBR               (dep: lib-time)
-│   │
-│   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
-│   ├── lib-draw.pine        # Palette, styles, withAlpha, drawLevel, drawBox, fillCloud, FIFO
-│   ├── lib-zone-draw.pine   # renderZone(Zone, style)                               (dep: lib-zone, lib-draw)
+│   ├── libraries/              # Libs partagées, publiées sur TradingView (cf. docs/LIBS.md).
+│   │   │                       # Le préfixe `lib-` du nom de fichier disparaît (redondant avec
+│   │   │                       # le dossier) ; le nom publié reste `lib_X` (cf. `library("lib_X")`).
+│   │   │  --- Couche 0 : fondations (types & utils) ---
+│   │   ├── time.pine           # Timezones, isNewDay, sessionStart/End
+│   │   ├── market.pine         # Détection cashEU / cashUS / cashAsia / nonCash         (dep: time)
+│   │   ├── zone.pine           # UDT Zone, overlap, contains, cycle de vie, FIFO
+│   │   ├── series.pine         # slope%, isFlatSeries, isClosingSeries (analytics génériques)
+│   │   │
+│   │   │  --- Couche 1 : signaux & calculs purs (importable par les stratégies) ---
+│   │   ├── bollinger.pine      # BB inner/outer                                          (dep: series)
+│   │   ├── ma.pine             # SMA, projectSMA                                         (dep: bollinger, series)
+│   │   ├── ichimoku.pine       # Tenkan / Kijun / Senkou A&B / Chikou
+│   │   ├── supertrend.pine     # Line + dir normalisée ±1
+│   │   ├── signal.pine         # Bougies de signal : CMI, englobantes, open en extrême  (dep: series)
+│   │   ├── sd.pine             # Supply/Demand zones lifecycle current TF                (dep: zone, signal)
+│   │   ├── fvg.pine            # Détection FVG, niveaux, comblement, retourne une Zone  (dep: zone)
+│   │   ├── gap.pine            # Détection gap daily multi-TF + cycle de vie
+│   │   ├── levels.pine         # PDH/PDL/PWH/PWL/PMH/PML/ATH, Opens, OR, sessions       (dep: time, market)
+│   │   ├── structure.pine      # IPA (market structure)
+│   │   ├── cmi-zone.pine       # CMI Zones state machine (validations parallèles)        (dep: signal)
+│   │   │
+│   │   │  --- Couche 2 : rendering (importée uniquement par les indicateurs) ---
+│   │   └── draw.pine           # Palette, styles, drawLevel, drawSessionLevel, drawZone,
+│   │                           # drawDynamicLevel                                        (dep: zone)
 │   │
 │   │  --- Indicateurs ---
-│   ├── layout.pine          # 2Ai Layout
-│   ├── levels.pine          # 2Ai Levels
-│   ├── zones.pine           # 2Ai Zones
-│   ├── zones-MTF.pine       # 2Ai Zones MTF
-│   └── *.pine               # Tout autre 2Ai XXX
+│   ├── layout.pine             # 2Ai Layout
+│   ├── levels.pine             # 2Ai Levels (homonyme de la lib `libraries/levels.pine` — distinct)
+│   ├── zones-SD.pine           # 2Ai Zones (Supply/Demand + FVG)
+│   ├── zones-CMI.pine          # 2Ai CMI Zones (test single-TF, valide la state machine cmi-zone)
+│   ├── zones-MTF.pine          # 2Ai Zones MTF (CMI MTF — scaffold, à wirer)
+│   └── *.pine                  # Tout autre 2Ai XXX
 ├── docs/
-│   ├── SPECIFICATIONS.md    # Référence du comportement attendu
-│   ├── LIBS.md              # Tableau des versions publiées de chaque lib
-│   └── <feature>.md         # Doc par feature (français)
-└── .claude/skills/          # Skills invocables
+│   ├── SPECIFICATIONS.md       # Référence du comportement attendu
+│   ├── LIBS.md                 # Tableau des versions publiées de chaque lib
+│   └── <feature>.md            # Doc par feature (français)
+└── .claude/skills/             # Skills invocables
 ```
 
 ### Règle d'or — isolation des couches
@@ -63,8 +71,9 @@ indicators/
 
 ### Versioning des libs
 - Chaque lib a sa version publiée TradingView indépendante (`import <publisher>/<libName>/<version>`).
-- Quand une lib bump, propager le `/<version>` dans **toutes** les libs/indicateurs qui l'importent.
-- Le tableau de versions vit dans `docs/LIBS.md` (créé au premier publish).
+- **`docs/LIBS.md` est la SOURCE DE VÉRITÉ** pour le publisher et les versions publiées. À consulter SYSTÉMATIQUEMENT avant d'écrire ou de modifier un `import` Pine. Ne jamais inventer une version ni laisser un placeholder `<publisher>` ou `/<n>` si LIBS.md a la valeur réelle.
+- Quand une lib bump, propager le `/<version>` dans **toutes** les libs/indicateurs qui l'importent ET mettre à jour `docs/LIBS.md` (cf. `/delivery-plan`).
+- Si une lib n'est pas encore publiée (statut `_non publié_` dans LIBS.md), garder son `import` commenté dans les consommateurs avec un TODO.
 
 ## Conventions
 - Code et identifiants : **anglais** (variables, fonctions, types, commentaires Pine)
@@ -89,6 +98,7 @@ indicators/
 ## Git Workflow
 - Jamais de commit, push ou opération git destructive sans demande explicite de l'utilisateur
 - L'utilisateur contrôle toutes les opérations git
+- **Avant TOUTE proposition de merge ou de PR** vers `develop` ou `main`, invoquer `/delivery-plan` pour générer la checklist de livraison TradingView (publish/bump des libs, propagation des imports, validation chart). Ne pas merger tant que la checklist n'a pas été présentée et que le user n'a pas confirmé les publications.
 
 ## Règles d'architecture Pine
 - Les calculs lourds (boucles, `request.security`, parcours d'arrays) doivent être confinés ; éviter de les exécuter à chaque barre quand ce n'est pas nécessaire
@@ -152,10 +162,12 @@ En cas d'erreur de compilation inexpliquée sur un `if`/`for` ou une expression 
 Les futures cibles (cTrader, MetaTrader, PRT) n'ont **pas** d'équivalent direct des `box`/`line`/`label` Pine ni du modèle de série temporelle Pine. Le portage = réécriture, pas conversion auto. C'est précisément pour ça que toute la logique métier vit dans les libs : pour avoir une "spec exécutable" claire à porter.
 
 ## Skills
-- `/new-library` — scaffold d'une nouvelle `lib-xxx.pine`
+- `/new-library` — scaffold d'une nouvelle lib (`tradingview/libraries/xxx.pine`)
 - `/new-indicator` — scaffold d'un nouvel indicateur 2Ai
 - `/doc-feature` — génère/maj doc française d'une feature dans `docs/`
 - `/update-specs` — met à jour `docs/SPECIFICATIONS.md` quand un comportement change
 - `/check-quality` — audit Pine : conventions, gestion `na`, perf, séparation lib/indicateur
+- `/delivery-plan` — checklist de livraison TradingView (publish libs, bump versions, validation chart). **Obligatoire avant tout merge/PR.**
+- `/lib-published <lib> <version>` — à invoquer dès qu'une lib est publiée/bumpée sur TradingView. Met à jour `docs/LIBS.md` et active/bumpe les imports dans les consommateurs.
 
 Si l'utilisateur demande quelque chose qui mériterait un skill réutilisable, proposer de le créer.

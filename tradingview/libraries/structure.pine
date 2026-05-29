@@ -1,0 +1,123 @@
+//@version=6
+// @description lib-structure — Structure de marché (Couche 1, ne dessine pas).
+//              Encapsule la gestion d'une collection d'IPA (Inefficacité Prix-Action) =
+//              swings cassés (clôture stricte au-delà) ET non encore retestés (mèche revenue
+//              toucher le niveau depuis le côté opposé à la cassure).
+//
+//              Détection : `ta.pivothigh` / `ta.pivotlow` (N configurable, ICT-like : 2-3 typique).
+//
+//              Validation pending : un pivot n'est ajouté à la collection que lorsqu'un pivot
+//              OPPOSÉ se forme après lui (= preuve qu'il a "créé" un haut/bas opposé). L'état
+//              pending est tenu via `var` interne à `updateIPAs` (pattern lib-sd : `var hadCmiPrev`),
+//              donc invisible au consommateur (volontairement).
+//
+//              Lifecycle (à chaque barre) :
+//                1. Pass 1 — breaks : pour chaque IPA non cassée, si la close franchit le niveau
+//                   dans la bonne direction → marque comme cassée + log la `breakBar`.
+//                2. Pass 2 — retests : pour chaque IPA cassée sur une barre STRICTEMENT
+//                   ANTÉRIEURE (`breakBar < bar_index`), si la MÈCHE de la barre courante revient
+//                   toucher le niveau depuis le côté opposé → supprime de la collection.
+//                3. Anti-amas : si plusieurs IPA du même side ont été cassées sur la barre
+//                   courante, ne garder que la plus récente par `bar`.
+//                4. FIFO : trim aux `maxIPAs` plus récents.
+library("lib_structure", overlay = true)
+
+// ============================================================
+// UDT
+// ============================================================
+
+// @type Un IPA = un swing pivot cassé (clôture stricte au-delà) attendant un retest.
+// @field price    Prix du pivot.
+// @field bar      `bar_index` de formation du pivot.
+// @field isRes    true = résistance (pivot high) ; false = support (pivot low).
+// @field broken   true dès que `close` franchit `price` dans la bonne direction.
+// @field breakBar `bar_index` de la cassure (`na` tant que pas cassé).
+export type IPA
+    float price
+    int   bar
+    bool  isRes
+    bool  broken
+    int   breakBar
+
+// ============================================================
+// Update — appelé à chaque barre par le consommateur
+// ============================================================
+
+// @function Met à jour la collection d'IPA pour la barre courante.
+//           Mute `ipas` in place. L'état pending (pivot en attente de validation par un pivot
+//           opposé) est tenu en `var` INTERNE à l'export (= 1 instance par site d'appel).
+// @param ipas     Array à muter.
+// @param pivotN   Profondeur du fractal (`ta.pivothigh(high, N, N)`). Typique : 2-3.
+// @param maxIPAs  Cap FIFO sur la collection.
+// @returns Array<IPA> (par commodité de chaînage).
+export updateIPAs(array<IPA> ipas, simple int pivotN, simple int maxIPAs) =>
+    // État pending interne (1 par call site).
+    var float pendPrice = na
+    var int   pendBar   = na
+    var bool  pendIsRes = false
+
+    // --- 1. Détection des pivots ---
+    ph = ta.pivothigh(high, pivotN, pivotN)
+    pl = ta.pivotlow(low,   pivotN, pivotN)
+
+    // --- 2. Pending : push le précédent si un pivot OPPOSÉ vient de se former, puis remplace ---
+    if not na(ph)
+        if not na(pendPrice) and not pendIsRes
+            array.push(ipas, IPA.new(pendPrice, pendBar, pendIsRes, false, int(na)))
+        pendPrice := ph
+        pendBar   := bar_index - pivotN
+        pendIsRes := true
+
+    if not na(pl)
+        if not na(pendPrice) and pendIsRes
+            array.push(ipas, IPA.new(pendPrice, pendBar, pendIsRes, false, int(na)))
+        pendPrice := pl
+        pendBar   := bar_index - pivotN
+        pendIsRes := false
+
+    // --- 3. Pass 1 : breaks (forward). Remplacement explicite via `array.set` au lieu de
+    //     muter `ipa.broken` in place (défensif vs. comportement de référence cross-lib). ---
+    nP1 = array.size(ipas)
+    if nP1 > 0
+        for i = 0 to nP1 - 1
+            ipa = array.get(ipas, i)
+            if not ipa.broken
+                if (ipa.isRes and close > ipa.price) or ((not ipa.isRes) and close < ipa.price)
+                    array.set(ipas, i, IPA.new(ipa.price, ipa.bar, ipa.isRes, true, bar_index))
+
+    // --- 4. Pass 2 : retests (descending, remove). UNIQUEMENT sur barres > breakBar
+    //     (sinon la barre de cassure elle-même déclencherait un faux retest).
+    //     Retest = MÈCHE qui revient toucher depuis le côté opposé. ---
+    nP2 = array.size(ipas)
+    if nP2 > 0
+        for i = nP2 - 1 to 0
+            ipa = array.get(ipas, i)
+            if ipa.broken and not na(ipa.breakBar) and ipa.breakBar < bar_index
+                retestCond = (ipa.isRes and low <= ipa.price) or ((not ipa.isRes) and high >= ipa.price)
+                if retestCond
+                    array.remove(ipas, i)
+
+    // --- 5. Anti-amas : si plusieurs IPA same-side cassées sur la BARRE COURANTE,
+    //     ne garder que celle dont `bar` est le plus récent. ---
+    for side in array.from(true, false)
+        latestBar = -1
+        nA1 = array.size(ipas)
+        if nA1 > 0
+            for i = 0 to nA1 - 1
+                ipaA = array.get(ipas, i)
+                if ipaA.isRes == side and not na(ipaA.breakBar) and ipaA.breakBar == bar_index
+                    if ipaA.bar > latestBar
+                        latestBar := ipaA.bar
+        if latestBar >= 0
+            nA2 = array.size(ipas)
+            if nA2 > 0
+                for i = nA2 - 1 to 0
+                    ipaB = array.get(ipas, i)
+                    if ipaB.isRes == side and not na(ipaB.breakBar) and ipaB.breakBar == bar_index and ipaB.bar != latestBar
+                        array.remove(ipas, i)
+
+    // --- 6. FIFO ---
+    while array.size(ipas) > maxIPAs
+        array.shift(ipas)
+
+    ipas

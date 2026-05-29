@@ -1,0 +1,62 @@
+//@version=6
+// @description lib-sd — Supply/Demand zones lifecycle pour l'UT courante. Couche 1, ne dessine pas.
+//              Encapsule la gestion d'une collection de zones S/D : détection via CMI, anti-chaînage
+//              same-bar, anti-chevauchement par remplacement, expiration au comblement total, FIFO.
+//              Le consommateur (indicateur Zones) appelle `updateZones()` à chaque barre et ne fait
+//              que l'orchestration du rendu.
+library("lib_sd", overlay = true)
+
+import mpilard/lib_zone/2   as zone
+import mpilard/lib_signal/2 as signal
+
+// @function Met à jour la collection de zones S/D pour la barre courante.
+//           Ordre des étapes :
+//           1. **Lifecycle** sur les zones existantes : expire celles dont le prix a totalement
+//              traversé la zone (`low ≤ bottom` pour bull, `high ≥ top` pour bear).
+//              ⚠ Lifecycle AVANT création pour qu'une zone créée sur la barre courante ne soit pas
+//              instantanément tuée par sa propre CMI (cas `low_N < low_N-1`, signature normale d'un
+//              retournement).
+//           2. **Création** si CMI détectée sur la barre courante ET la barre précédente n'avait
+//              pas de CMI (anti-chaînage). Zone construite à partir de la range complète de n-1
+//              (`high[1]`, `low[1]`, `time[1]`). Si le candidat chevauche en prix une zone active
+//              de même side, l'ancienne est expirée (anti-chevauchement par remplacement : les S/D
+//              sont court terme, la dernière interaction prime).
+//           3. **Cleanup** : retire les expirées + FIFO si dépassement du max.
+// @param sdZones   Array<Zone> à muter in place.
+// @param cmiSignal Sortie de `signal.detectCMI()` sur la barre courante.
+// @param maxZones  Cap FIFO (cohérent avec `max_boxes_count` Pine).
+// @returns Array<Zone> (par commodité de chaînage).
+export updateZones(array<zone.Zone> sdZones, signal.SignalKind cmiSignal, simple int maxZones) =>
+    // --- 1. Lifecycle ---
+    n = array.size(sdZones)
+    if n > 0
+        for i = 0 to n - 1
+            z = array.get(sdZones, i)
+            if zone.isActive(z)
+                if z.side == zone.ZoneSide.BULL and low <= z.bottom
+                    zone.expire(z)
+                else if z.side == zone.ZoneSide.BEAR and high >= z.top
+                    zone.expire(z)
+
+    // --- 2. Création (anti-chaînage + anti-chevauchement) ---
+    var bool hadCmiPrev = false
+    cmiNow = cmiSignal == signal.SignalKind.CMI_BULL or cmiSignal == signal.SignalKind.CMI_BEAR
+
+    if cmiNow and not hadCmiPrev
+        side = cmiSignal == signal.SignalKind.CMI_BULL ? zone.ZoneSide.BULL : zone.ZoneSide.BEAR
+        tfMinutes = math.round(timeframe.in_seconds() / 60)
+        newZ = zone.newZone(high[1], low[1], time[1], side, tfMinutes)
+        nn = array.size(sdZones)
+        if nn > 0
+            for i = 0 to nn - 1
+                existing = array.get(sdZones, i)
+                if zone.isActive(existing) and existing.side == side and zone.overlap(existing, newZ)
+                    zone.expire(existing)
+        array.push(sdZones, newZ)
+
+    hadCmiPrev := cmiNow
+
+    // --- 3. Cleanup ---
+    zone.removeExpired(sdZones)
+    zone.trimOldest(sdZones, maxZones)
+    sdZones

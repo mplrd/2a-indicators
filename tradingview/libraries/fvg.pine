@@ -1,0 +1,96 @@
+//@version=6
+// @description lib-fvg — détection de Fair Value Gaps (FVG) + cycle de vie (partial/total fill). Couche 1.
+//              Pas de dessin. Renvoie / mute des `lib_zone.Zone`.
+library("lib_fvg", overlay = true)
+
+import mpilard/lib_zone/2 as zone
+
+// ============================================================
+// Détection
+// ============================================================
+
+// @function Détecte un FVG sur la barre courante (3-bar pattern).
+//
+//           - **Bullish** : `low > high[2]` → zone `[high[2], low]` (top = low, bottom = high[2]).
+//           - **Bearish** : `high < low[2]` → zone `[high, low[2]]` (top = low[2], bottom = high).
+//
+//           Le `leftTime` de la zone est `time[2]` (début du pattern, 1re des 3 bougies).
+//
+//           **Filtre anti-faux-gap** : on rejette le pattern si l'une des 2 transitions
+//           (`bar[2] → bar[1]` ou `bar[1] → bar[0]`) saute une période non tradée (delta de temps
+//           > 1.5× la durée normale d'une barre). Couvre les fermetures cash overnight,
+//           week-ends, et breaks de session — sans paramétrage et sans fenêtre arbitraire de barres.
+// @param tfMinutes   Timeframe d'origine en minutes (à stocker dans la Zone).
+// @returns Zone détectée ou `na`.
+export detect(int tfMinutes) =>
+    expectedMs = timeframe.in_seconds() * 1000
+    // 1.5x = tolérance pour les micro-décalages (DST, alignement chart, etc.) tout en
+    // capturant un vrai gap (overnight cash = >>> 1x).
+    hasTimeGap = (time - time[1]) > expectedMs * 1.5 or (time[1] - time[2]) > expectedMs * 1.5
+
+    bullFvg = (not hasTimeGap) and low  > high[2]
+    bearFvg = (not hasTimeGap) and high < low[2]
+
+    // Chaîne de ternaires sur type Zone (Pine est plus tolérant que `if cond ... := ...` pour
+    // l'inférence de type avec UDT importée). Le `naZ` typé Zone sert de fallback explicite.
+    zone.Zone naZ = na
+    bullFvg ? zone.newZone(low, high[2], time[2], zone.ZoneSide.BULL, tfMinutes) : bearFvg ? zone.newZone(low[2], high, time[2], zone.ZoneSide.BEAR, tfMinutes) : naZ
+
+// ============================================================
+// Cycle de vie
+// ============================================================
+
+// @function Met à jour le cycle de vie d'un FVG avec le bar courant (mutation in-place).
+//           - Partial fill : le prix entre dans la zone sans la traverser → top/bottom resserre.
+//             Bull → `top := low` quand `low < top`.
+//             Bear → `bottom := high` quand `high > bottom`.
+//           - Total fill : le prix traverse entièrement → `state := EXPIRED`.
+//             Bull → `low <= bottom`.
+//             Bear → `high >= top`.
+//           No-op si la zone n'est pas active.
+// @param z Zone FVG à mettre à jour.
+export update(zone.Zone z) =>
+    if zone.isActive(z)
+        bullSide    = z.side == zone.ZoneSide.BULL
+        bullFilled  = bullSide        and low  <= z.bottom
+        bearFilled  = (not bullSide)  and high >= z.top
+        bullPartial = bullSide        and (not bullFilled) and low  < z.top
+        bearPartial = (not bullSide)  and (not bearFilled) and high > z.bottom
+
+        if bullFilled or bearFilled
+            zone.expire(z)
+        if bullPartial
+            z.top := low
+        if bearPartial
+            z.bottom := high
+
+// ============================================================
+// Collection lifecycle — orchestration complète
+// ============================================================
+
+// @function Met à jour la collection de FVG pour la barre courante.
+//           Étapes :
+//           1. **Lifecycle** sur les FVG existants (partial/total fill).
+//           2. **Détection** d'un nouveau FVG sur le 3-bar pattern courant (filtre anti-faux-gap
+//              temporel intégré). Le `tfMinutes` est calculé en interne.
+//           3. **Cleanup** : retire les expirés + FIFO.
+// @param fvgZones  Array<Zone> à muter in place.
+// @param maxZones  Cap FIFO.
+// @returns Array<Zone> (par commodité).
+export updateZones(array<zone.Zone> fvgZones, simple int maxZones) =>
+    // 1. Lifecycle
+    n = array.size(fvgZones)
+    if n > 0
+        for i = 0 to n - 1
+            update(array.get(fvgZones, i))
+
+    // 2. Détection
+    tfMinutes = math.round(timeframe.in_seconds() / 60)
+    newFvg = detect(tfMinutes)
+    if not na(newFvg)
+        array.push(fvgZones, newFvg)
+
+    // 3. Cleanup
+    zone.removeExpired(fvgZones)
+    zone.trimOldest(fvgZones, maxZones)
+    fvgZones

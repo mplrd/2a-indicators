@@ -1,0 +1,85 @@
+//@version=6
+// @description lib-series — analytics génériques sur séries : pente, planéité, fermeture. Couche 0 (aucune dépendance, ne dessine rien).
+library("lib_series", overlay = true)
+
+// ============================================================
+// Pente
+// ============================================================
+
+// @function Pente d'une série exprimée en pourcentage entre la barre courante et celle d'il y a `length` barres.
+// @param src    Série source.
+// @param length Nombre de barres pour mesurer la variation (>0).
+// @returns Pente en %. `na` si l'une des valeurs est `na` ou si la valeur passée vaut 0.
+export slopePercent(series float src, simple int length) =>
+    past = src[length]
+    na(src) or na(past) or past == 0.0 ? na : (src - past) / past * 100.0
+
+// ============================================================
+// États d'une série
+// ============================================================
+
+// @function Vrai si la pente en valeur absolue est sous le seuil. Détection "série plate".
+// @param src       Série source.
+// @param length    Nombre de barres pour mesurer la pente.
+// @param threshold Seuil en pourcentage (ex : 0.015 = 0.015%).
+// @returns bool. `false` si la pente est `na`.
+export isFlatSeries(series float src, simple int length, simple float threshold) =>
+    s = slopePercent(src, length)
+    na(s) ? false : math.abs(s) < threshold
+
+// @function Vrai si la pente va dans le sens de la fermeture, ET la série n'est pas plate.
+// @param src       Série source.
+// @param length    Nombre de barres pour mesurer la pente.
+// @param threshold Seuil sous lequel la série est considérée plate (donc non "closing").
+// @param isUpper   true  → closing si la série descend (slope < 0).
+//                  false → closing si la série monte  (slope > 0).
+// @returns bool. Mutuellement exclusif avec `isFlatSeries` pour les mêmes paramètres.
+export isClosingSeries(series float src, simple int length, simple float threshold, simple bool isUpper) =>
+    s = slopePercent(src, length)
+    na(s) or math.abs(s) < threshold ? false : (isUpper ? s < 0.0 : s > 0.0)
+
+// ============================================================
+// Projection
+// ============================================================
+
+// @function Projette une moyenne mobile fenêtrée (SMA) `barsAhead` barres dans le futur, sous
+//           l'hypothèse que `src` reste constant à sa valeur courante. Calcul fermé exact sous
+//           cette hypothèse : on retire les `barsAhead` valeurs les plus anciennes de la fenêtre
+//           et on les remplace par la valeur courante.
+//           Formule : SMA_proj(k) = SMA(N) + (k · src − Σ_{i=1..k} src[N−i]) / N.
+// @param src       Série source.
+// @param length    Taille de la fenêtre (doit être > barsAhead).
+// @param barsAhead Nombre de barres à projeter (1, 2, 3, ...).
+// @returns series float — valeur projetée de la moyenne.
+export projectMean(series float src, simple int length, simple int barsAhead) =>
+    sumDropped = 0.0
+    for i = 1 to barsAhead
+        sumDropped := sumDropped + nz(src[length - i])
+    ta.sma(src, length) + (barsAhead * src - sumDropped) / length
+
+// ============================================================
+// Fractales (Bill Williams) — pivot 5 bougies sur `src[2]`
+// ============================================================
+
+// @function Vrai si `src[2]` est un sommet local sur la fenêtre [src[0], ..., src[4]] —
+//           "top fractal" Bill Williams. Pattern strict :
+//             `src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]`.
+// @returns series bool.
+export fractalTop(series float src) =>
+    src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]
+
+// @function Vrai si `src[2]` est un creux local sur la fenêtre [src[0], ..., src[4]] —
+//           "bot fractal" Bill Williams. Pattern strict miroir de `fractalTop`.
+// @returns series bool.
+export fractalBot(series float src) =>
+    src[4] > src[2] and src[3] > src[2] and src[2] < src[1] and src[2] < src[0]
+
+// @function Encode l'état fractal de `src[2]` en un int signé : +1 (top), -1 (bot), 0 (rien).
+//           Pratique pour stocker / comparer le type de pivot détecté.
+//           Appels hoistés hors du ternaire (sinon `fractalBot` court-circuité quand `fractalTop`
+//           est vrai → CW10004, cohérence d'historique compromise).
+// @returns series int.
+export fractalize(series float src) =>
+    bool top = fractalTop(src)
+    bool bot = fractalBot(src)
+    top ? 1 : bot ? -1 : 0

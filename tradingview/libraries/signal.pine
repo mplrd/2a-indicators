@@ -1,0 +1,42 @@
+//@version=6
+// @description lib-signal — détection de "bougies de signal" : patterns ponctuels qui déclenchent
+//              un setup (CMI, englobantes, open en extrême, etc.). Couche 1. Pas de dessin.
+//              Utilisée par les indicateurs Zones et par les futures stratégies pour identifier la
+//              bougie d'entrée sur un setup donné.
+library("lib_signal", overlay = true)
+
+// ============================================================
+// Types
+// ============================================================
+
+// @enum SignalKind — type de signal détecté sur la barre courante.
+//        Étendre au fur et à mesure des besoins (englobante, open extrême, etc.).
+export enum SignalKind
+    NONE
+    CMI_BULL
+    CMI_BEAR
+
+// ============================================================
+// CMI — Continuation Movement Indicator (bougie de retournement)
+// ============================================================
+
+// @function Détecte un signal CMI sur la barre courante.
+//           Référence : SMA 7 de hl2 (haut + bas / 2).
+//
+//           Bullish CMI :
+//           - `open < ref`           (ouvre sous la référence)
+//           - `close > open`         (bougie verte)
+//           - `close > high[1]`      (cloture au-dessus du high précédent)
+//           - `open != low`          (pas d'ouverture en extrême bas)
+//
+//           Bearish CMI : symétrique (`open > ref`, `close < open`, `close < low[1]`, `open != high`).
+//
+//           NB : cette détection ne fait PAS la validation 3 bougies (utilisée pour zones-MTF).
+//                Le consommateur (zones.pine current TF) prend la CMI telle quelle ;
+//                zones-MTF.pine appliquera la validation côté indicateur.
+// @returns SignalKind (NONE / CMI_BULL / CMI_BEAR).
+export detectCMI() =>
+    ref = ta.sma(hl2, 7)
+    bullCMI = open < ref and close > open and close > high[1] and open != low
+    bearCMI = open > ref and close < open and close < low[1]  and open != high
+    bullCMI ? SignalKind.CMI_BULL : bearCMI ? SignalKind.CMI_BEAR : SignalKind.NONE

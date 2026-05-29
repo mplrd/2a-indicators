@@ -1,0 +1,19 @@
+//@version=6
+// @description lib-supertrend — Supertrend ATR avec direction normalisée. Couche 1 (calculs purs, ne dessine rien).
+library("lib_supertrend", overlay = true)
+
+// ============================================================
+// Supertrend
+// ============================================================
+
+// @function Calcule un Supertrend ATR et retourne la valeur de la ligne ainsi qu'une direction normalisée.
+//           Note : la fonction native `ta.supertrend` retourne -1 pour un uptrend et +1 pour un downtrend
+//           (convention contre-intuitive). Cette fonction inverse pour respecter la convention projet :
+//           +1 = haussier, -1 = baissier.
+// @param atrLen Période de l'ATR (défaut 10).
+// @param factor Multiplicateur de l'ATR (défaut 3.0).
+// @returns Tuple [line, dir] où dir ∈ {+1, -1}.
+export run(simple int atrLen = 10, simple float factor = 3.0) =>
+    [line, rawDir] = ta.supertrend(factor, atrLen)
+    dir = rawDir < 0 ? 1 : -1
+    [line, dir]
