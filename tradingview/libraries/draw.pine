@@ -319,46 +319,14 @@ export clearLabels(array<label> labelArr) =>
 //        ici. À réintroduire si un futur indicateur a un design qui s'en accommode.
 
 // ============================================================
-// Ichimoku — wrapper plot Tenkan / Kijun / Senkou A / Senkou B / Chikou + fill Kumo
+// Plots avec `display` ou `linestyle` configurable — NON wrappables
 // ============================================================
-
-// @function Dessine les 5 lignes Ichimoku + le Kumo (fill Senkou A vs B). Tenkan/Kijun/Chikou en
-//           SOLID, Senkou A/B en SOLID décalés `kijunOffset` barres en avant, fill Kumo entre A et B.
-//           Chikou décalé `-kijunOffset` barres en arrière.
-//           NB : `display` est calculé en interne via `on ? display.all : display.none` plutôt
-//                que pris en param — Pine v6 ne reconnaît plus `plot_display` comme keyword de
-//                type (CE10149), et le `display` param de plot() n'accepte pas un `simple` calculé.
-// @param tenkan       Série Tenkan.
-// @param kijun        Série Kijun.
-// @param senkouA      Série Senkou Span A.
-// @param senkouB      Série Senkou Span B.
-// @param chikou       Série Chikou Span.
-// @param tenkanCol    Couleur Tenkan.
-// @param kijunCol     Couleur Kijun.
-// @param senkouACol   Couleur Senkou A.
-// @param senkouBCol   Couleur Senkou B.
-// @param kumoCol      Couleur du fill Kumo (déjà avec transparence).
-// @param chikouCol    Couleur Chikou.
-// @param kijunOffset  Période Kijun (pour le décalage des Senkou et du Chikou).
-// @param mainOn       true → Tenkan/Kijun/Senkou/Kumo visibles. false → display.none sur tout le bloc principal.
-// @param chikouOn     true → Chikou visible. false → display.none sur Chikou (peut être indépendant du main).
-export plotIchimoku(series float tenkan, series float kijun, series float senkouA, series float senkouB, series float chikou, series color tenkanCol, series color kijunCol, series color senkouACol, series color senkouBCol, series color kumoCol, series color chikouCol, simple int kijunOffset, simple bool mainOn, simple bool chikouOn) =>
-    plot(tenkan, "Tenkan", color = tenkanCol, linewidth = 1, display = mainOn ? display.all : display.none)
-    plot(kijun,  "Kijun",  color = kijunCol,  linewidth = 1, display = mainOn ? display.all : display.none)
-    pSenkouA = plot(senkouA, "Senkou A", color = senkouACol, linewidth = 1, offset = kijunOffset, display = mainOn ? display.all : display.none)
-    pSenkouB = plot(senkouB, "Senkou B", color = senkouBCol, linewidth = 1, offset = kijunOffset, display = mainOn ? display.all : display.none)
-    fill(pSenkouA, pSenkouB, color = kumoCol, title = "Kumo", display = mainOn ? display.all : display.none)
-    plot(chikou, "Chikou", color = chikouCol, linewidth = 1, offset = -kijunOffset, display = chikouOn ? display.all : display.none)
-
-// ============================================================
-// Supertrend — wrapper plot en style linebr
-// ============================================================
-
-// @function Dessine la ligne Supertrend avec interruption (`plot.style_linebr`) — la ligne s'interrompt
-//           sur les changements de direction (les `na` ne sont pas connectés).
-// @param value    Série Supertrend (mise à `na` en dehors du contexte d'affichage par le caller).
-// @param col      Couleur (typiquement bull/bear selon dir).
-// @param width    Épaisseur.
-// @param on       true → display.all. false → display.none.
-export plotSupertrend(series float value, series color col, simple int width, simple bool on) =>
-    plot(value, "Supertrend", color = col, linewidth = width, style = plot.style_linebr, display = on ? display.all : display.none)
+// Pine v6 exige `input plot_display` pour `plot(..., display = ...)` (CE10123) et
+// `input plot_line_style` pour `plot(..., linestyle = ...)`. Or :
+//   - Une lib ne peut pas qualifier ses params `input` (CE10160) — uniquement `simple` ou `series`.
+//   - Un `simple bool ? const : const` produit du `simple plot_simple_display`, refusé.
+//   - `plot_display` n'est même plus un keyword de type valide en v6 (CE10149).
+// Conséquence : tout plot avec display ou linestyle dynamique DOIT rester inline dans l'indicateur.
+// Ichimoku (display dynamique via toggle/chikouOnly) et Supertrend (display dynamique via toggle)
+// avaient été esquissés ici puis retirés pour cette raison. Pas de duplication à factoriser tant
+// que cette contrainte tient.
