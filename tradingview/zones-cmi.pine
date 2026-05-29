@@ -11,7 +11,7 @@ indicator("2Ai CMI Zones", shorttitle = "Zones CMI", overlay = true, max_boxes_c
 // ============================================================
 import mpilard/lib_cmi_zone/4 as cmiZone
 import mpilard/lib_signal/2   as signal
-import mpilard/lib_draw/17    as draw
+import mpilard/lib_draw/18    as draw
 
 // ============================================================
 // Inputs
