@@ -1,6 +1,6 @@
 //@version=6
 // @description 2Ai Layout — Bollinger (Classique + Magique), Moyennes mobiles (MA7/20/50/200), Ichimoku et Supertrend.
-indicator("2Ai Layout", shorttitle = "2Ai Layout", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+indicator("2Ai Layout", shorttitle = "Layout", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
 
 // ============================================================
 // Imports

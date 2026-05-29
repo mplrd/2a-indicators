@@ -3,7 +3,7 @@
 // max_bars_back = 5000 : `draw.drawLevel` reference une barre d'origine dynamique (`x1 = startBar`)
 // jusqu'a 365 barres en arriere. Sans buffer explicite, Pine l'auto-detecte trop court (365) et
 // `line.new` deborde → "requested historical offset beyond buffer limit". 5000 = plafond projet.
-indicator("2Ai Levels", shorttitle = "2Ai Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, max_bars_back = 5000)
+indicator("2Ai Levels", shorttitle = "Levels", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, max_bars_back = 5000)
 
 // ============================================================
 // Imports

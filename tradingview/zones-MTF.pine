@@ -9,8 +9,7 @@
 //              dans une fonction exportee ne peut pas dependre des args de cette fonction). Les 7
 //              `var array<CmiZone>` vivent donc dans le `var` interne d'`updateOne` cote lib —
 //              une instance par contexte `request.security`.
-indicator("2Ai Zones MTF", shorttitle = "Zones MTF", overlay = true,
-  max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
+indicator("2Ai Zones MTF", shorttitle = "Zones MTF", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
 
 // ============================================================
 // Imports
