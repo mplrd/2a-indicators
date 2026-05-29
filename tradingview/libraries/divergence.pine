@@ -43,17 +43,19 @@ export findDivergences(series float oscSrc, series float priceHigh, series float
     bool topPivot = series.fractalTop(oscSrc)
     bool botPivot = series.fractalBot(oscSrc)
 
-    float fractalTopVal = topPivot and (useLimits ? oscSrc[2] >= topLimit : true) ? oscSrc[2] : na
-    float fractalBotVal = botPivot and (useLimits ? oscSrc[2] <= botLimit : true) ? oscSrc[2] : na
+    // Conditions bool pour `ta.valuewhen` (CE10123 si on passe un float) ET pour le retour.
+    // Le consommateur les utilise comme bool (`rsiFractalTop ? rsi[2] : na` dans le plot).
+    bool fractalTopCond = topPivot and (useLimits ? oscSrc[2] >= topLimit : true)
+    bool fractalBotCond = botPivot and (useLimits ? oscSrc[2] <= botLimit : true)
 
-    float highPrev  = ta.valuewhen(fractalTopVal, oscSrc[2],    0)[2]
-    float highPrice = ta.valuewhen(fractalTopVal, priceHigh[2], 0)[2]
-    float lowPrev   = ta.valuewhen(fractalBotVal, oscSrc[2],    0)[2]
-    float lowPrice  = ta.valuewhen(fractalBotVal, priceLow[2],  0)[2]
+    float highPrev  = ta.valuewhen(fractalTopCond, oscSrc[2],    0)[2]
+    float highPrice = ta.valuewhen(fractalTopCond, priceHigh[2], 0)[2]
+    float lowPrev   = ta.valuewhen(fractalBotCond, oscSrc[2],    0)[2]
+    float lowPrice  = ta.valuewhen(fractalBotCond, priceLow[2],  0)[2]
 
-    bool bearRegular = fractalTopVal and priceHigh[2] > highPrice and oscSrc[2] < highPrev
-    bool bullRegular = fractalBotVal and priceLow[2]  < lowPrice  and oscSrc[2] > lowPrev
-    bool bearHidden  = fractalTopVal and priceHigh[2] < highPrice and oscSrc[2] > highPrev
-    bool bullHidden  = fractalBotVal and priceLow[2]  > lowPrice  and oscSrc[2] < lowPrev
+    bool bearRegular = fractalTopCond and priceHigh[2] > highPrice and oscSrc[2] < highPrev
+    bool bullRegular = fractalBotCond and priceLow[2]  < lowPrice  and oscSrc[2] > lowPrev
+    bool bearHidden  = fractalTopCond and priceHigh[2] < highPrice and oscSrc[2] > highPrev
+    bool bullHidden  = fractalBotCond and priceLow[2]  > lowPrice  and oscSrc[2] < lowPrev
 
-    [fractalTopVal, fractalBotVal, bearRegular, bullRegular, bearHidden, bullHidden]
+    [fractalTopCond, fractalBotCond, bearRegular, bullRegular, bearHidden, bullHidden]
