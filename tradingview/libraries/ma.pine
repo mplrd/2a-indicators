@@ -4,8 +4,24 @@
 //              vit dans lib-series : c'est une analyse générique de série, pas une primitive MA.
 library("lib_ma", overlay = true)
 
-import mpilard/lib_bollinger/1 as bb
+import mpilard/lib_bollinger/3 as bb
 import mpilard/lib_series/2    as series
+
+// ============================================================
+// Moyennes — variantes
+// ============================================================
+
+// @function Double Exponential Moving Average (DEMA, Mulloy 1994). Variante "zero-lag" courante :
+//           applique deux fois l'EMA et combine pour réduire le retard inhérent à une EMA simple.
+//           Formule : `DEMA(src, length) = 2 * EMA(src, length) - EMA(EMA(src, length), length)`.
+//           Building block de `lib_macd.zeroRetard()`.
+// @param src    Série source.
+// @param length Période.
+// @returns series float.
+export dema(series float src, simple int length) =>
+    e1 = ta.ema(src, length)
+    e2 = ta.ema(e1, length)
+    2 * e1 - e2
 
 // ============================================================
 // Ruban autour d'une SMA

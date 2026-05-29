@@ -1,0 +1,36 @@
+//@version=6
+// @description 2Ai MACD ZR — oscillateur MACD Zero Retard (DEMA-based) porté de la version v5 de
+//              référence (`_tv-indicators/macd-zr.pine`). Toute la logique de calcul vit dans
+//              `lib_macd.zeroRetard()` ; l'indicateur n'orchestre que les inputs et le rendu.
+indicator(title = "2Ai MACD ZR", shorttitle = "MACD ZR", overlay = false)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_macd/1 as macd
+
+// ============================================================
+// Inputs
+// ============================================================
+src          = input.source(close, "Source")
+fastLength   = input.int(12, "Fast length",   minval = 1)
+slowLength   = input.int(26, "Slow length",   minval = 1)
+signalLength = input.int(9,  "Signal length", minval = 1)
+
+// ============================================================
+// Calculs — délégués à lib_macd
+// ============================================================
+[macdLine, signalLine, hist, average] = macd.zeroRetard(src, fastLength, slowLength, signalLength)
+
+// ============================================================
+// Rendu — orchestration de plots (Pine impose plot() en top-level)
+// ============================================================
+mainColor = hist > 0 ? color.rgb(76, 175, 79) : color.rgb(255, 82, 82)
+
+plot(hist, title = "Histogram", style = plot.style_columns, color = mainColor)
+
+pSignal = plot(signalLine, title = "Signal",  color = mainColor,  linewidth = 1)
+pMacd   = plot(macdLine,   title = "MACD ZR", color = color.gray)
+fill(pMacd, pSignal, title = "MACD Background", color = hist > 0 ? color.rgb(76, 175, 79, 50) : color.rgb(255, 82, 82, 75))
+
+plot(average, title = "MA Line", color = color.rgb(82, 122, 255))
