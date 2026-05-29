@@ -11,7 +11,7 @@ indicator("2Ai CMI Zones", shorttitle = "Zones CMI", overlay = true, max_boxes_c
 // ============================================================
 import mpilard/lib_cmi_zone/4 as cmiZone
 import mpilard/lib_signal/2   as signal
-import mpilard/lib_draw/16    as draw
+import mpilard/lib_draw/17    as draw
 
 // ============================================================
 // Inputs
@@ -54,8 +54,6 @@ var array<box>   boxArr   = array.new<box>()
 var array<label> labelArr = array.new<label>()  // requis par la signature drawZoneBox (jamais peuplé ici, showLbl=false)
 
 if barstate.islast
-    for bx in boxArr
-        box.delete(bx)
-    array.clear(boxArr)
+    draw.clearBoxes(boxArr)
     for cz in zones
         draw.drawZoneBox(cmiEnabled, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, zoneColor, bordWidth, bordStyle, 85, 40, false, "", boxArr, labelArr)
