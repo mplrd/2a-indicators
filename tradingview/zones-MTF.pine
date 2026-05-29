@@ -95,15 +95,18 @@ m15Start = cmiZone.interestStartForTf(15,    chartTz)
 m5Start  = cmiZone.interestStartForTf(5,     chartTz)
 
 // 7 request.security retournant chacun un tuple [open, high, low, close, time, signal HTF].
-// Pas de `lookahead_on` (la barre HTF courante peut flicker en temps réel — accepté, les zones
-// se stabilisent après 3 bougies HTF de validation).
-[mO,  mH,  mL,  mC,  mT,  mSig]  = request.security(syminfo.tickerid, "M",   [open, high, low, close, time, signal.detectCMI()])
-[wO,  wH,  wL,  wC,  wT,  wSig]  = request.security(syminfo.tickerid, "W",   [open, high, low, close, time, signal.detectCMI()])
-[dO,  dH,  dL,  dC,  dT,  dSig]  = request.security(syminfo.tickerid, "D",   [open, high, low, close, time, signal.detectCMI()])
-[h4O, h4H, h4L, h4C, h4T, h4Sig] = request.security(syminfo.tickerid, "240", [open, high, low, close, time, signal.detectCMI()])
-[h1O, h1H, h1L, h1C, h1T, h1Sig] = request.security(syminfo.tickerid, "60",  [open, high, low, close, time, signal.detectCMI()])
-[m15O,m15H,m15L,m15C,m15T,m15Sig]= request.security(syminfo.tickerid, "15",  [open, high, low, close, time, signal.detectCMI()])
-[m5O, m5H, m5L, m5C, m5T, m5Sig] = request.security(syminfo.tickerid, "5",   [open, high, low, close, time, signal.detectCMI()])
+// Pattern anti-repaint canonique : `[1] + lookahead_on`. Sans `[1]`, à la transition d'une barre
+// HTF, on capture l'OHLC just-started de la barre suivante (open≈high≈low≈close = previous close)
+// au lieu de l'OHLC final de la barre qui vient de clôturer → ring buffer dégénéré, zones
+// construites à des positions absurdes. Avec `[1]` + `lookahead_on`, on reçoit toujours l'OHLC
+// final de la dernière barre HTF CLÔTURÉE, stable, sans look-ahead du futur.
+[mO,  mH,  mL,  mC,  mT,  mSig]  = request.security(syminfo.tickerid, "M",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[wO,  wH,  wL,  wC,  wT,  wSig]  = request.security(syminfo.tickerid, "W",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[dO,  dH,  dL,  dC,  dT,  dSig]  = request.security(syminfo.tickerid, "D",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[h4O, h4H, h4L, h4C, h4T, h4Sig] = request.security(syminfo.tickerid, "240", [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[h1O, h1H, h1L, h1C, h1T, h1Sig] = request.security(syminfo.tickerid, "60",  [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[m15O,m15H,m15L,m15C,m15T,m15Sig]= request.security(syminfo.tickerid, "15",  [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[m5O, m5H, m5L, m5C, m5T, m5Sig] = request.security(syminfo.tickerid, "5",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
 
 // 7 collections persistantes en chart-context (1 instance par TF, mutée in place — pas de snapshot).
 var array<cmiZone.CmiZone> mZones   = array.new<cmiZone.CmiZone>()
