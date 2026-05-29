@@ -1,6 +1,6 @@
 using cAlgo.API;
 
-namespace TwoAi.Indicators.Core
+namespace _2Ai.Indicators.Core
 {
     /// <summary>
     /// Équivalent de Pine <c>lib_supertrend</c>. Couche 1 — ne dessine rien.

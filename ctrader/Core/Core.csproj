@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
-    <AssemblyName>TwoAi.Indicators.Core</AssemblyName>
-    <RootNamespace>TwoAi.Indicators.Core</RootNamespace>
+    <AssemblyName>2Ai.Indicators.Core</AssemblyName>
+    <RootNamespace>_2Ai.Indicators.Core</RootNamespace>
     <Nullable>disable</Nullable>
     <LangVersion>latest</LangVersion>
     <!-- cAlgo charge les DLL via réflexion ; on ne génère pas de PDB en release -->

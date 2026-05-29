@@ -4,13 +4,21 @@ Portage des indicateurs Pine v6 (`tradingview/`) vers cAlgo (cTrader Automate, C
 
 Cible plateforme : **cTrader Desktop 5.7+** / cAlgo .NET 6 / namespace `cAlgo.API`.
 
+## Convention nommage
+
+| Niveau | Valeur |
+|---|---|
+| AssemblyName / DLL sur disque | `2Ai.Indicators.Core.dll` |
+| Namespace C# | `_2Ai.Indicators.Core` (préfixe underscore — C# interdit les identifiers commençant par un chiffre) |
+| Indicator titre cAlgo | `2Ai Layout`, `2Ai Levels`, etc. (chaîne libre dans `[Indicator(...)]`) |
+
 ## Architecture
 
 Même découpage 3-couches que le projet Pine — l'objectif `max reuse` est central.
 
 ```
 ctrader/
-├── Core/                      # Class Library compilée en TwoAi.Indicators.Core.dll
+├── Core/                      # Class Library compilée en 2Ai.Indicators.Core.dll
 │   ├── Core.csproj
 │   ├── Series.cs              # equiv lib_series  (Couche 0)
 │   ├── Zone.cs                # equiv lib_zone    (Couche 0)
@@ -44,13 +52,13 @@ Chaque indicateur est un projet cAlgo (`.csproj` séparé). Tous référencent `
 
 2. **Ajuster les `HintPath`** dans les `.csproj` (`Core.csproj` + chaque `Indicators/<Name>/<Name>.csproj`) si la version installée diffère de celle référencée par défaut.
 
-3. **Build `Core`** d'abord (Class Library) → produit `Core/bin/Release/net6.0/TwoAi.Indicators.Core.dll`.
+3. **Build `Core`** d'abord (Class Library) → produit `Core/bin/Release/net6.0/2Ai.Indicators.Core.dll`.
 
 4. **Build chaque indicateur** → produit le DLL d'indicateur que cAlgo charge.
 
 ### Déploiement vers cTrader
 
-Les indicateurs cAlgo se placent dans : `C:\Users\<toi>\Documents\cAlgo\Sources\Indicators\` (ou équivalent selon l'install). Le DLL `TwoAi.Indicators.Core.dll` doit être trouvable par cAlgo — typiquement copié dans le même dossier que le DLL de l'indicateur, ou référencé via le projet.
+Les indicateurs cAlgo se placent dans : `C:\Users\<toi>\Documents\cAlgo\Sources\Indicators\` (ou équivalent selon l'install). Le DLL `2Ai.Indicators.Core.dll` doit être trouvable par cAlgo — typiquement copié dans le même dossier que le DLL de l'indicateur, ou référencé via le projet.
 
 ## Conventions de portage
 

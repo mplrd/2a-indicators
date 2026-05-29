@@ -1,7 +1,7 @@
 using System;
 using cAlgo.API;
 
-namespace TwoAi.Indicators.Core
+namespace _2Ai.Indicators.Core
 {
     /// <summary>
     /// Équivalent de Pine <c>lib_bollinger</c>. Couche 1 — calculs purs, ne dessine rien.

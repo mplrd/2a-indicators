@@ -1,6 +1,6 @@
 using cAlgo.API;
 
-namespace TwoAi.Indicators.Core
+namespace _2Ai.Indicators.Core
 {
     /// <summary>
     /// Équivalent de Pine <c>lib_draw</c>. Couche 2 — helpers de rendu / décision de couleur.
