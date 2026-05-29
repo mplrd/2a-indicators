@@ -16,15 +16,17 @@ library("lib_gap", overlay = true)
 // ============================================================
 
 // @type Gap — gap journalier avec orientation et ancrage temporel.
-// @field top          Borne haute (mutée si comblement partiel haussier).
-// @field bottom       Borne basse (mutée si comblement partiel baissier).
-// @field dir          Direction : `1` = haussier (gap up, low > close[1]), `-1` = baissier.
-// @field leftBarIndex `bar_index` de la barre AVANT le gap (ancre xloc.bar_index, adjacente).
+// @field top      Borne haute (mutée si comblement partiel haussier).
+// @field bottom   Borne basse (mutée si comblement partiel baissier).
+// @field dir      Direction : `1` = haussier (gap up, low > close[1]), `-1` = baissier.
+// @field leftTime Timestamp ms de la barre AVANT le gap (ancre `xloc.bar_time`, adjacente). On
+//                 ancre en temps (pas en `bar_index`) pour ne pas heurter la limite de distance
+//                 du bord gauche d'une `box` en `xloc.bar_index` sur gros historique.
 export type Gap
     float top
     float bottom
     int   dir
-    int   leftBarIndex
+    int   leftTime
 
 // ============================================================
 // Helpers privés
@@ -104,7 +106,7 @@ export update(simple int maxLookback) =>
 
     // Nouveau gap au changement de jour chart : push + FIFO trim.
     if timeframe.change("D") and dHas
-        array.push(gaps, Gap.new(dTop, dBottom, dDir, bar_index - 1))
+        array.push(gaps, Gap.new(dTop, dBottom, dDir, time[1]))
         while array.size(gaps) > maxLookback
             array.shift(gaps)
 

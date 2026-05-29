@@ -230,27 +230,30 @@ export drawZoneBox(series bool show, series bool isActive, int leftTime, float t
     bx
 
 // ============================================================
-// Gaps — rendu d'un gap journalier en `box` (primitive, ancrée en bar_index)
+// Gaps — rendu d'un gap journalier en `box` (primitive, ancrée en bar_time)
 // ============================================================
 
-// @function Dessine un gap en `box` rectangulaire. Ancre `xloc.bar_index` (différent de `drawZoneBox`
-//           qui est en `xloc.bar_time`) car le gap est positionné par rapport à la barre adjacente
-//           qui le précède. Pas de bordure (`border_color = na`), juste un fond avec transparence.
+// @function Dessine un gap en `box` rectangulaire. Ancre `xloc.bar_time` (comme `drawZoneBox`) :
+//           le bord gauche est positionné par le timestamp de la barre adjacente qui précède le gap.
+//           On ancre en TEMPS (pas en `bar_index`) pour ne pas heurter la limite de distance du bord
+//           gauche d'une box en `xloc.bar_index` sur gros historique (gap lointain → crash "Bar index
+//           too far"). Pas de bordure (`border_color = na`), juste un fond avec transparence.
 //           Étendu à droite (extend.right) pour rester visible tant que le gap n'est pas comblé.
-// @param show         Toggle global.
-// @param leftBarIndex `bar_index` de la barre AVANT le gap (ancre adjacente).
-// @param top          Borne haute.
-// @param bottom       Borne basse.
-// @param col          Couleur de fond.
-// @param bgAlpha      Transparence du fond (0 = opaque, 100 = invisible).
-// @param boxArr       Array des boxes (push uniquement, le caller gère le nettoyage).
+// @param show     Toggle global.
+// @param leftTime Timestamp ms de la barre AVANT le gap (ancre adjacente, `xloc.bar_time`).
+// @param top      Borne haute.
+// @param bottom   Borne basse.
+// @param col      Couleur de fond.
+// @param bgAlpha  Transparence du fond (0 = opaque, 100 = invisible).
+// @param boxArr   Array des boxes (push uniquement, le caller gère le nettoyage).
 // @returns series box — la box créée ou `na`.
-export drawGapBox(series bool show, int leftBarIndex, float top, float bottom, series color col, simple int bgAlpha, array<box> boxArr) =>
+export drawGapBox(series bool show, int leftTime, float top, float bottom, series color col, simple int bgAlpha, array<box> boxArr) =>
     box bx = na
-    if show and not na(leftBarIndex) and not na(top) and not na(bottom)
+    if show and not na(leftTime) and not na(top) and not na(bottom)
+        oneBarMs = timeframe.in_seconds() * 1000
         bx := box.new(
-          left = leftBarIndex, top = top, right = bar_index, bottom = bottom,
-          xloc = xloc.bar_index,
+          left = leftTime, top = top, right = time + oneBarMs * 5, bottom = bottom,
+          xloc = xloc.bar_time,
           border_color = na,
           bgcolor = color.new(col, bgAlpha),
           extend = extend.right,
