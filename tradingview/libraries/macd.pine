@@ -1,33 +1,39 @@
 //@version=6
-// @description lib-macd — MACD et variantes. Couche 1, ne dessine pas.
-//              Délègue les moyennes mobiles à `lib_ma` (DEMA pour les variantes Zero Lag).
+// @description lib-macd — MACD et variantes "zero-lag". Couche 1, ne dessine pas.
+//              Délègue le choix de la MA à `lib_ma.apply(mode, ...)` (DEMA/TEMA/ZLEMA).
 library("lib_macd", overlay = false)
 
 import mpilard/lib_ma/3 as ma
 
 // ============================================================
-// MACD Zero Retard (Zero Lag MACD / MACD ZR)
+// MACD Zero Lag (paramétrable DEMA / TEMA / ZLEMA)
 // ============================================================
 
-// @function MACD Zero Retard — variante du MACD classique qui remplace les EMA fast/slow ET la
-//           signal line par des DEMA, ce qui réduit le lag inhérent au MACD EMA-based.
-//           Formule (portée d'un indicateur de référence validé) :
-//             - demaFast = DEMA(src, fastLen)
-//             - demaSlow = DEMA(src, slowLen)
-//             - macd     = demaFast - demaSlow
-//             - signal   = DEMA(macd, signalLen)   (et non EMA — c'est le « zero retard »)
-//             - hist     = macd - signal
-//             - average  = SMA(macd, signalLen)    (référence lente sur l'oscillateur lui-même)
+// @function MACD "zero-lag" paramétré par la méthode de lissage. Variante du MACD classique qui
+//           remplace les EMA fast/slow ET la signal line par une MA paramétrable :
+//             - DEMA  (Mulloy '94)  : lisse, lag réduit.
+//             - TEMA  (Mulloy '94)  : compromis lag/lissage poussé.
+//             - ZLEMA (Ehlers '94)  : très réactif, plus bruité.
+//
+//           Formule :
+//             - fast = ma.apply(mode, src, fastLen)
+//             - slow = ma.apply(mode, src, slowLen)
+//             - macd = fast − slow
+//             - signal = ma.apply(mode, macd, signalLen)
+//             - hist = macd − signal
+//             - average = SMA(macd, signalLen)  (référence lente non-zero-lag sur l'oscillateur)
+//
 // @param src        Série source (typiquement close).
-// @param fastLen    Période DEMA rapide (défaut 12).
-// @param slowLen    Période DEMA lente (défaut 26).
-// @param signalLen  Période du signal (DEMA du MACD) ET de la moving average SMA (défaut 9).
+// @param fastLen    Période MA rapide.
+// @param slowLen    Période MA lente.
+// @param signalLen  Période du signal (MA du MACD) ET de la moving average SMA.
+// @param mode       Méthode de lissage (`ma.MaMode.DEMA` / `.TEMA` / `.ZLEMA`).
 // @returns [macd, signal, histogram, average].
-export zeroRetard(series float src, simple int fastLen, simple int slowLen, simple int signalLen) =>
-    demaFast = ma.dema(src, fastLen)
-    demaSlow = ma.dema(src, slowLen)
-    macd     = demaFast - demaSlow
-    signal   = ma.dema(macd, signalLen)
-    hist     = macd - signal
-    average  = ta.sma(macd, signalLen)
+export zeroLag(series float src, simple int fastLen, simple int slowLen, simple int signalLen, simple ma.MaMode mode) =>
+    fastMa  = ma.apply(mode, src, fastLen)
+    slowMa  = ma.apply(mode, src, slowLen)
+    macd    = fastMa - slowMa
+    signal  = ma.apply(mode, macd, signalLen)
+    hist    = macd - signal
+    average = ta.sma(macd, signalLen)
     [macd, signal, hist, average]

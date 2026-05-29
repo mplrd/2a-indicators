@@ -1,26 +1,29 @@
 //@version=6
-// @description 2Ai MACD ZR — oscillateur MACD Zero Retard (DEMA-based) porté de la version v5 de
-//              référence (`_tv-indicators/macd-zr.pine`). Toute la logique de calcul vit dans
-//              `lib_macd.zeroRetard()` ; l'indicateur n'orchestre que les inputs et le rendu.
+// @description 2Ai MACD ZR — oscillateur MACD "zero-lag" paramétrable DEMA / TEMA / ZLEMA.
+//              Portage de la version v5 de référence (`_tv-indicators/macd-zr.pine`, DEMA-only)
+//              avec ajout du choix de méthode de lissage. Toute la logique de calcul vit dans
+//              `lib_macd.zeroLag()` ; l'indicateur n'orchestre que les inputs et le rendu.
 indicator(title = "2Ai MACD ZR", shorttitle = "MACD ZR", overlay = false)
 
 // ============================================================
 // Imports
 // ============================================================
+import mpilard/lib_ma/3   as ma
 import mpilard/lib_macd/1 as macd
 
 // ============================================================
 // Inputs
 // ============================================================
-src          = input.source(close, "Source")
-fastLength   = input.int(12, "Fast length",   minval = 1)
-slowLength   = input.int(26, "Slow length",   minval = 1)
-signalLength = input.int(9,  "Signal length", minval = 1)
+src          = input.source(close,        "Source")
+fastLength   = input.int(12,              "Fast length",   minval = 1)
+slowLength   = input.int(26,              "Slow length",   minval = 1)
+signalLength = input.int(9,               "Signal length", minval = 1)
+maMode       = input.enum(ma.MaMode.DEMA, "Méthode de lissage", tooltip = "DEMA : lisse, lag réduit (parité avec la version v5 de référence). TEMA : compromis lag/lissage poussé. ZLEMA : très réactif, plus bruité.")
 
 // ============================================================
 // Calculs — délégués à lib_macd
 // ============================================================
-[macdLine, signalLine, hist, average] = macd.zeroRetard(src, fastLength, slowLength, signalLength)
+[macdLine, signalLine, hist, average] = macd.zeroLag(src, fastLength, slowLength, signalLength, maMode)
 
 // ============================================================
 // Rendu — orchestration de plots (Pine impose plot() en top-level)

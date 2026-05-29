@@ -8,20 +8,55 @@ import mpilard/lib_bollinger/3 as bb
 import mpilard/lib_series/2    as series
 
 // ============================================================
-// Moyennes — variantes
+// Moyennes — variantes "zero-lag"
 // ============================================================
 
-// @function Double Exponential Moving Average (DEMA, Mulloy 1994). Variante "zero-lag" courante :
-//           applique deux fois l'EMA et combine pour réduire le retard inhérent à une EMA simple.
-//           Formule : `DEMA(src, length) = 2 * EMA(src, length) - EMA(EMA(src, length), length)`.
-//           Building block de `lib_macd.zeroRetard()`.
-// @param src    Série source.
-// @param length Période.
+// @enum MaMode — choix de la méthode de lissage pour les indicateurs qui prennent une "MA mode".
+//                Spectre lag → réactivité : DEMA (lisse) → TEMA (intermédiaire) → ZLEMA (réactif).
+//                Les titres servent au dropdown des `input.enum()`.
+export enum MaMode
+    DEMA  = "DEMA"
+    TEMA  = "TEMA"
+    ZLEMA = "ZLEMA"
+
+// @function Double Exponential Moving Average (DEMA, Mulloy 1994). Applique deux fois l'EMA et
+//           combine pour réduire le retard. Formule :
+//             `DEMA(src, length) = 2·EMA(src, length) − EMA(EMA(src, length), length)`.
 // @returns series float.
 export dema(series float src, simple int length) =>
     e1 = ta.ema(src, length)
     e2 = ta.ema(e1, length)
     2 * e1 - e2
+
+// @function Triple Exponential Moving Average (TEMA, Mulloy 1994). Étend la logique DEMA avec une
+//           3e passe pour pousser plus loin la réduction du lag tout en gardant le filtrage du
+//           multi-pass. Formule :
+//             `TEMA(src, length) = 3·EMA − 3·EMA(EMA) + EMA(EMA(EMA))`.
+// @returns series float.
+export tema(series float src, simple int length) =>
+    e1 = ta.ema(src, length)
+    e2 = ta.ema(e1, length)
+    e3 = ta.ema(e2, length)
+    3 * e1 - 3 * e2 + e3
+
+// @function Zero-Lag EMA (ZLEMA, Ehlers 1994). Approche différente du multi-pass DEMA/TEMA :
+//           anticipe l'input avec un lag-shift puis EMA classique. Plus réactif aux retournements,
+//           plus bruité. Formule :
+//             `ZLEMA(src, length) = EMA(2·src − src[lag], length)`  où  `lag = (length − 1) / 2`.
+// @returns series float.
+export zlema(series float src, simple int length) =>
+    int lag = (length - 1) / 2
+    ta.ema(2 * src - src[lag], length)
+
+// @function Dispatch générique : retourne la MA correspondant au mode demandé. Permet à un
+//           consommateur (`lib_macd.zeroLag()`, futurs indicateurs paramétrables) de prendre un
+//           `simple MaMode` en input et de déléguer le choix sans dupliquer le switch.
+// @returns series float.
+export apply(simple MaMode mode, series float src, simple int length) =>
+    switch mode
+        MaMode.DEMA  => dema(src, length)
+        MaMode.TEMA  => tema(src, length)
+        MaMode.ZLEMA => zlema(src, length)
 
 // ============================================================
 // Ruban autour d'une SMA
