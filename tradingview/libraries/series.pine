@@ -76,6 +76,10 @@ export fractalBot(series float src) =>
 
 // @function Encode l'état fractal de `src[2]` en un int signé : +1 (top), -1 (bot), 0 (rien).
 //           Pratique pour stocker / comparer le type de pivot détecté.
+//           Appels hoistés hors du ternaire (sinon `fractalBot` court-circuité quand `fractalTop`
+//           est vrai → CW10004, cohérence d'historique compromise).
 // @returns series int.
 export fractalize(series float src) =>
-    fractalTop(src) ? 1 : fractalBot(src) ? -1 : 0
+    bool top = fractalTop(src)
+    bool bot = fractalBot(src)
+    top ? 1 : bot ? -1 : 0
