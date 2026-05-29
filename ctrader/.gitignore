@@ -1,0 +1,15 @@
+
+# .NET build artifacts
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Rider
+.idea/
+
+# JetBrains workspace
+*.dotsettings.user
