@@ -19,8 +19,8 @@
 | `lib-ichimoku` | 1 | **`1`** | 2026-05-18 | — | publié |
 | `lib-supertrend` | 1 | **`1`** | 2026-05-18 | — | publié |
 | `lib-signal` | 1 | **`2`** | 2026-05-21 | — | publié (v1 : `SignalKind` + `detectCMI()` ; v2 : retire la condition de direction de la SMA de référence, garde uniquement `open < ref` / `open > ref`) |
-| `lib-sd` | 1 | **`1`** | 2026-05-21 | `lib-zone` v1, `lib-signal` v2 | publié (v1 : `updateZones(sdZones, cmiSignal, maxZones)` qui orchestre lifecycle avant création + anti-chaînage + anti-chevauchement par remplacement + cleanup) |
-| `lib-fvg` | 1 | **`3`** | 2026-05-21 | `lib-zone` v1 | publié (v1 : `detect()` + `update()` avec exclusion N barres post-day-change ; v2 : remplace l'exclusion par un filtre transition temporelle `> 1.5×` durée bar ; v3 : ajoute `updateZones(fvgZones, maxZones)` qui orchestre lifecycle + detect + cleanup) |
+| `lib-sd` | 1 | **`2`** | 2026-05-29 | `lib-zone` v2, `lib-signal` v2 | publié. v1 : `updateZones(sdZones, cmiSignal, maxZones)` qui orchestre lifecycle avant création + anti-chaînage + anti-chevauchement par remplacement + cleanup. **v2** : bump du dep `lib-zone` v1 → v2 — Pine v6 traite `lib_zone/1.Zone` et `lib_zone/2.Zone` comme deux types DISTINCTS (CE10123), donc bump cascade obligatoire pour qu'un caller qui a bumpé lib_zone puisse encore appeler `sd.updateZones`. |
+| `lib-fvg` | 1 | **`4`** | 2026-05-29 | `lib-zone` v2 | publié. v1-v3 historique (detect/update/filtre temporel/updateZones). **v4** : bump du dep `lib-zone` v1 → v2 — même raison que lib-sd v2 (CE10123 sur identité cross-version d'UDT). |
 | `lib-gap` | 1 | **`7`** | 2026-05-29 | — | publié. v6 = réécriture portée de l'ancien indicateur après faux gaps sur 24h + crash distance : API `detectDaily()` + `checkFill()` exposées au consommateur, cycle de vie de la box côté indicateur. **v7** : UDT `Gap` (top, bottom, dir, leftBarIndex) + `update(maxLookback) → array<Gap>` orchestre tout le cycle de vie (detect via request.security daily + push on day-change + FIFO trim + checkFill par barre, retrait si total / mutation directionnelle si partiel). `detectDaily` et `checkFill` deviennent **privés** (le consommateur n'utilise plus que `update`). Consommé par `levels.pine`. |
 | `lib-levels` | 1 | **`12`** | 2026-05-20 | `lib-time` v2 | publié (v1 `previousPeriodHL` + `ath()` ; v2 `sessionHL()` ; v3 `sessionOpen()` + `sessionIBR()` ; v4-v7 itérations IBR ; v8 `firstH1OfDay()` ; v9-v10 itérations OR + TZ ; v11 `sessionHL/Open` reset à minuit chart (param `chartTz`), `openRange(tz)` ; v12 `sessionHL` parse `sessionStr` pour borner sEnd dès début de session) |
 | `lib-structure` | 1 | **`3`** | 2026-05-22 | — | publié (v1 : UDT `IPA` + `IPAState` + `updateIPAs()` ; v2 : retest = close stricte ; v3 : retire `IPAState` (state pending en `var` interne, pattern lib-sd), remet retest = mèche, `array.set` défensif pour le break) |
@@ -41,8 +41,8 @@ import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
 import mpilard/lib_zone/2       as zone
 import mpilard/lib_signal/2     as signal
-import mpilard/lib_sd/1         as sd
-import mpilard/lib_fvg/3        as fvg
+import mpilard/lib_sd/2         as sd
+import mpilard/lib_fvg/4        as fvg
 import mpilard/lib_gap/7        as gap
 import mpilard/lib_levels/12    as levels
 import mpilard/lib_structure/3  as structure

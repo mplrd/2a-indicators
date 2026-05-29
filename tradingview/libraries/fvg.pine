@@ -3,7 +3,7 @@
 //              Pas de dessin. Renvoie / mute des `lib_zone.Zone`.
 library("lib_fvg", overlay = true)
 
-import mpilard/lib_zone/1 as zone
+import mpilard/lib_zone/2 as zone
 
 // ============================================================
 // Détection
