@@ -1,0 +1,59 @@
+//@version=6
+// @description lib-divergence — détection de divergences régulières et cachées sur un oscillateur
+//              quelconque (RSI, MACD, Stoch RSI, OBV...). Couche 1, pas de dessin. Délègue la
+//              détection des pivots à `lib_series.fractalTop`/`fractalBot`.
+//
+//              Algorithme porté d'une source de référence validée (`_tv-indicators/divergences.pine`).
+//              Le pivot est identifié sur `oscSrc[2]` (5-bar fractal). On compare l'extremum local
+//              de l'oscillateur ET du prix à l'extremum local PRÉCÉDENT pour détecter les 4 types
+//              de divergence :
+//
+//                Régulière (= classique, retournement de tendance) :
+//                  - Bear : prix fait un higher high, oscillateur fait un lower high  → fractal top.
+//                  - Bull : prix fait un lower  low,  oscillateur fait un higher low  → fractal bot.
+//
+//                Cachée (= continuation de tendance) :
+//                  - Bear : prix fait un lower  high, oscillateur fait un higher high → fractal top.
+//                  - Bull : prix fait un higher low,  oscillateur fait un lower  low  → fractal bot.
+library("lib_divergence", overlay = false)
+
+import mpilard/lib_series/3 as series
+
+// ============================================================
+// Détection
+// ============================================================
+
+// @function Détecte les 4 types de divergence (régulières bear/bull + cachées bear/bull) sur un
+//           oscillateur quelconque comparé au prix. Renvoie également les indicateurs de pivots
+//           fractaux pour usage côté indicateur (plot des markers à `offset = -2`).
+//
+//           Le filtre par bornes `topLimit` / `botLimit` (actif si `useLimits = true`) permet de
+//           restreindre la détection aux zones surachat / survente (pattern type RSI).
+//
+// @param oscSrc      Série oscillateur (RSI, Stoch K, MACD histogram, etc.).
+// @param priceHigh   Série prix high (typiquement `high`).
+// @param priceLow    Série prix low  (typiquement `low`).
+// @param topLimit    Seuil au-dessus duquel les bear divergences sont retenues (ex. 62 pour RSI).
+// @param botLimit    Seuil en dessous duquel les bull divergences sont retenues (ex. 38 pour RSI).
+// @param useLimits   true → applique les seuils. false → détecte toutes les divergences.
+// @returns [fractalTop, fractalBot, bearRegular, bullRegular, bearHidden, bullHidden].
+export findDivergences(series float oscSrc, series float priceHigh, series float priceLow,
+  series float topLimit, series float botLimit, simple bool useLimits) =>
+
+    bool topPivot = series.fractalTop(oscSrc)
+    bool botPivot = series.fractalBot(oscSrc)
+
+    float fractalTopVal = topPivot and (useLimits ? oscSrc[2] >= topLimit : true) ? oscSrc[2] : na
+    float fractalBotVal = botPivot and (useLimits ? oscSrc[2] <= botLimit : true) ? oscSrc[2] : na
+
+    float highPrev  = ta.valuewhen(fractalTopVal, oscSrc[2],    0)[2]
+    float highPrice = ta.valuewhen(fractalTopVal, priceHigh[2], 0)[2]
+    float lowPrev   = ta.valuewhen(fractalBotVal, oscSrc[2],    0)[2]
+    float lowPrice  = ta.valuewhen(fractalBotVal, priceLow[2],  0)[2]
+
+    bool bearRegular = fractalTopVal and priceHigh[2] > highPrice and oscSrc[2] < highPrev
+    bool bullRegular = fractalBotVal and priceLow[2]  < lowPrice  and oscSrc[2] > lowPrev
+    bool bearHidden  = fractalTopVal and priceHigh[2] < highPrice and oscSrc[2] > highPrev
+    bool bullHidden  = fractalBotVal and priceLow[2]  > lowPrice  and oscSrc[2] < lowPrev
+
+    [fractalTopVal, fractalBotVal, bearRegular, bullRegular, bearHidden, bullHidden]

@@ -3,7 +3,7 @@
 //              Délègue le choix de la MA à `lib_ma.apply(mode, ...)` (DEMA/TEMA/ZLEMA).
 library("lib_macd", overlay = false)
 
-import mpilard/lib_ma/3 as ma
+import mpilard/lib_ma/4 as ma
 
 // ============================================================
 // MACD Zero Lag (paramétrable DEMA / TEMA / ZLEMA)

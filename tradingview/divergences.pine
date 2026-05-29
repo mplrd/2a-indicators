@@ -1,0 +1,114 @@
+//@version=6
+// @description 2Ai Divergences — RSI + Stochastic RSI avec détection de divergences régulières et
+//              cachées sur les deux oscillateurs. Toute la logique de calcul vit dans `lib_stochrsi`
+//              et `lib_divergence` (qui délègue les pivots à `lib_series`). L'indicateur n'orchestre
+//              que les inputs, les appels lib et le rendu (plots/hlines/fills).
+//              Portage de la source v5 (`_tv-indicators/divergences.pine`).
+indicator(title = "2Ai Divergences", shorttitle = "Divergences", overlay = false)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_stochrsi/1   as stochrsi
+import mpilard/lib_divergence/1 as divergence
+
+// ============================================================
+// Inputs
+// ============================================================
+var grpIndic = "Indicator Settings"
+indicLength = input.int(14, title = "Length", group = grpIndic)
+
+var grpRsi = "RSI Settings"
+rsiShow          = input.bool(true,  "Display",                  group = grpRsi, inline = "rsi")
+rsiShowMa        = input.bool(true,  "With MA",                  group = grpRsi, inline = "rsi")
+rsiMaLength      = input.int(50,     "",                         group = grpRsi, inline = "rsi")
+rsiShowDiv       = input.bool(true,  "With divergences",         group = grpRsi, inline = "rsiDiv")
+rsiShowHiddenDiv = input.bool(false, "With hidden divergences",  group = grpRsi, inline = "rsiDiv")
+
+var grpStoch = "Stochastic RSI Settings"
+stochShow          = input.bool(false, "Display",                 group = grpStoch)
+stochShowDiv       = input.bool(false, "With divergences",        group = grpStoch, inline = "stochDiv")
+stochShowHiddenDiv = input.bool(false, "With hidden divergences", group = grpStoch, inline = "stochDiv")
+
+var grpLevels = "Levels"
+levelDisplay     = input.bool(true, "Display",            group = grpLevels)
+levelOversold1   = input.int(38,    "Oversold",           group = grpLevels, inline = "Oversold")
+levelOversold2   = input.int(25,    "Extremely Oversold", group = grpLevels, inline = "Oversold")
+levelOverbought1 = input.int(62,    "Overbought",         group = grpLevels, inline = "Overbought")
+levelOverbought2 = input.int(75,    "Extremely Overbought", group = grpLevels, inline = "Overbought")
+
+// ============================================================
+// Constantes (figées par la source de référence)
+// ============================================================
+indicatorSource = close
+SMOOTH = 3
+MEDIAN = 50
+
+// ============================================================
+// Calculs — délégués aux libs
+// ============================================================
+rsi   = ta.rsi(indicatorSource, indicLength)
+rsiMA = ta.sma(rsi, rsiMaLength)
+
+[stochK, stochD] = stochrsi.compute(indicatorSource, indicLength, indicLength, SMOOTH, SMOOTH, false, false)
+
+// 2 passes RSI : avec bornes OB/OS (`useLimits = true`) pour les divergences classiques, sans bornes
+// (`useLimits = false`) pour la détection libre. Pattern hérité de la source v5.
+[rsiFractalTop,    rsiFractalBot,    rsiBearReg,    rsiBullReg,    rsiBearHid,    rsiBullHid]    = divergence.findDivergences(rsi, high, low, levelOverbought1, levelOversold1, true)
+[rsiFractalTopNl,  rsiFractalBotNl,  rsiBearRegNl,  rsiBullRegNl,  rsiBearHidNl,  rsiBullHidNl]  = divergence.findDivergences(rsi, high, low, 0, 0, false)
+
+// Stoch RSI : pas de bornes (le stoch oscille déjà entre 0 et 100).
+[stochFractalTop, stochFractalBot, stochBearReg, stochBullReg, stochBearHid, stochBullHid] = divergence.findDivergences(stochK, high, low, 0, 0, false)
+
+// ============================================================
+// Couleurs — état RSI (overbought / oversold) et divergences
+// ============================================================
+// Reprise tel quel du pattern source : on colore le RSI en rouge / vert quand il passe au-delà des
+// seuils ET que la barre précédente y était déjà (= confirmation, pas un simple flash).
+rsiColor = color.gray
+if rsi < levelOversold2 and rsi[1] <= levelOversold2
+    rsiColor := color.green
+else if rsi < levelOversold1 and rsi[1] <= levelOversold1
+    rsiColor := color.green
+else if rsi > levelOverbought2 and rsi[1] >= levelOverbought2
+    rsiColor := color.red
+else if rsi > levelOverbought1 and rsi[1] >= levelOverbought1
+    rsiColor := color.red
+
+rsiBearDivColor = (rsiShowDiv and rsiBearReg) or (rsiShowHiddenDiv and rsiBearHid) ? color.rgb(170, 0, 0, 0) : na
+rsiBullDivColor = (rsiShowDiv and rsiBullReg) or (rsiShowHiddenDiv and rsiBullHid) ? color.rgb(0, 100, 3, 0) : na
+
+stochBearDivColor = (stochShowDiv and stochBearReg) or (stochShowHiddenDiv and stochBearHid) ? color.rgb(255, 53, 53, 40) : na
+stochBullDivColor = (stochShowDiv and stochBullReg) or (stochShowHiddenDiv and stochBullHid) ? color.rgb(68, 184, 71, 40) : na
+
+// ============================================================
+// Rendu — Niveaux (hlines)
+// ============================================================
+lineMedian      = hline(MEDIAN,           title = "Median",            color = color.new(color.blue,  5), linestyle = hline.style_dotted, linewidth = 1, display = levelDisplay              ? display.all : display.none)
+lineOverbought1 = hline(levelOverbought1, title = "Overbought level 1", color = color.new(color.red,   5), linestyle = hline.style_dotted, linewidth = 1, display = levelDisplay and rsiShow ? display.all : display.none)
+lineOverbought2 = hline(levelOverbought2, title = "Overbought level 2", color = color.new(color.red,   5), linestyle = hline.style_dashed, linewidth = 1, display = levelDisplay and rsiShow ? display.all : display.none)
+lineOversold1   = hline(levelOversold1,   title = "Oversold level 1",   color = color.new(color.green, 5), linestyle = hline.style_dotted, linewidth = 1, display = levelDisplay and rsiShow ? display.all : display.none)
+lineOversold2   = hline(levelOversold2,   title = "Oversold level 2",   color = color.new(color.green, 5), linestyle = hline.style_dashed, linewidth = 1, display = levelDisplay and rsiShow ? display.all : display.none)
+
+// ============================================================
+// Rendu — RSI + divergences + MA + gradient fill OB/OS
+// ============================================================
+rsiplot = plot(rsiShow ? rsi : na, title = "RSI", color = rsiColor, linewidth = 2, display = rsiShow ? display.all : display.none)
+plot(series = rsiFractalTop ? rsi[2] : na, title = "RSI Bearish Divergence", color = rsiBearDivColor, linewidth = 3, offset = -2, display = rsiShow ? display.all : display.none)
+plot(series = rsiFractalBot ? rsi[2] : na, title = "RSI Bullish Divergence", color = rsiBullDivColor, linewidth = 3, offset = -2, display = rsiShow ? display.all : display.none)
+plot(series = rsiMA, title = "RSI MA", color = color.blue, display = rsiShow and rsiShowMa ? display.all : display.none)
+
+midLinePlot = plot(MEDIAN, color = na, editable = false, display = display.none)
+fill(rsiplot, midLinePlot, 100,            levelOverbought1, top_color = color.new(color.red,   0),   bottom_color = color.new(color.red,   100), title = "Overbought Gradient Fill")
+fill(rsiplot, midLinePlot, levelOversold1, 0,                top_color = color.new(color.green, 100), bottom_color = color.new(color.green, 0),   title = "Oversold Gradient Fill")
+
+// ============================================================
+// Rendu — Stochastic RSI + divergences + fill K/D
+// ============================================================
+stochKplot = plot(stochShow ? stochK : na, title = "Stoch K", color = color.rgb(33,  187, 243, 40), linewidth = 1, display = stochShow ? display.all : display.none)
+stochDplot = plot(stochShow ? stochD : na, title = "Stoch D", color = color.rgb(103, 58,  183, 60), linewidth = 1, display = stochShow ? display.all : display.none)
+stochFillColor = stochK >= stochD ? color.rgb(33, 186, 243, 80) : color.rgb(103, 58, 183, 70)
+fill(stochKplot, stochDplot, title = "KD Fill", color = stochFillColor)
+
+plot(series = stochFractalTop ? stochK[2] : na, title = "Stoch Bearish Divergence", color = stochBearDivColor, linewidth = 1, offset = -2, display = stochShow ? display.all : display.none)
+plot(series = stochFractalBot ? stochK[2] : na, title = "Stoch Bullish Divergence", color = stochBullDivColor, linewidth = 1, offset = -2, display = stochShow ? display.all : display.none)

@@ -1,0 +1,36 @@
+//@version=6
+// @description lib-stochrsi — Stochastic RSI (oscillateur stochastique appliqué au RSI). Couche 1,
+//              pas de dessin. Portage de l'implémentation v5 validée (`_tv-indicators/divergences.pine`).
+library("lib_stochrsi", overlay = false)
+
+// ============================================================
+// Compute
+// ============================================================
+
+// @function Stochastic RSI : applique l'oscillateur stochastique au RSI plutôt qu'au prix, ce qui
+//           amplifie les retournements sur des marchés en range. Implémentation portée d'une source
+//           de référence validée (compositions Pine usuelles).
+//
+//           Pipeline :
+//             1. `src` éventuellement transformé en log (`log = true`) pour amortir les grandes amplitudes.
+//             2. RSI(src, rsiLen).
+//             3. Stoch du RSI sur `stochLen` puis lissé sur `smoothK` (= K).
+//             4. SMA(K, smoothD) (= D).
+//             5. Si `useAvg = true`, la sortie K est remplacée par `avg(K, D)` (lissage supplémentaire).
+//
+// @param src        Série source (typiquement close).
+// @param stochLen   Période du stoch sur le RSI.
+// @param rsiLen     Période du RSI.
+// @param smoothK    Lissage K.
+// @param smoothD    Lissage D.
+// @param log        true → applique `math.log(src)` en entrée du RSI.
+// @param useAvg     true → K devient `avg(K, D)`.
+// @returns [k, d]
+export compute(series float src, simple int stochLen, simple int rsiLen, simple int smoothK, simple int smoothD, simple bool log, simple bool useAvg) =>
+    float s   = log ? math.log(src) : src
+    float r   = ta.rsi(s, rsiLen)
+    float kk  = ta.sma(ta.stoch(r, r, r, stochLen), smoothK)
+    float d   = ta.sma(kk, smoothD)
+    float avg = math.avg(kk, d)
+    float k   = useAvg ? avg : kk
+    [k, d]

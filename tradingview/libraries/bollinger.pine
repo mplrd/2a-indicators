@@ -2,7 +2,7 @@
 // @description lib-bollinger — Bandes de Bollinger avec multiplicateurs interne et externe. Couche 1 (calculs purs, ne dessine rien).
 library("lib_bollinger", overlay = true)
 
-import mpilard/lib_series/2 as series
+import mpilard/lib_series/3 as series
 
 // ============================================================
 // Bandes

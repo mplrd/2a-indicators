@@ -4,8 +4,8 @@
 //              vit dans lib-series : c'est une analyse générique de série, pas une primitive MA.
 library("lib_ma", overlay = true)
 
-import mpilard/lib_bollinger/3 as bb
-import mpilard/lib_series/2    as series
+import mpilard/lib_bollinger/4 as bb
+import mpilard/lib_series/3    as series
 
 // ============================================================
 // Moyennes — variantes "zero-lag"
