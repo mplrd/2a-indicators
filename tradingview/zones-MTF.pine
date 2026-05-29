@@ -14,7 +14,7 @@ indicator("2Ai Zones MTF", shorttitle = "Zones MTF", overlay = true, max_boxes_c
 // ============================================================
 // Imports
 // ============================================================
-import mpilard/lib_cmi_zone/4 as cmiZone
+import mpilard/lib_cmi_zone/5 as cmiZone
 import mpilard/lib_signal/2   as signal
 import mpilard/lib_draw/17    as draw
 
@@ -76,21 +76,54 @@ crossTfPending = crossModeStr == "Pending"
 maxZones      = input.int(100, "Max zones par TF (FIFO)", group = globalsGroup, minval = 1, maxval = 500)
 
 // ============================================================
-// Orchestration MTF — 7 request.security (un par TF)
+// Orchestration MTF — 7 request.security (un par TF) + state machine chart-context
 // ============================================================
-// `interestStartForTf` mappe tfMinutes → borne d'obsolescence (depuis `computeInterestStarts`).
-// M5 (tfMinutes < 15) retombe naturellement sur `subM15Start` = 1re bougie de J-1.
-// Pas de `lookahead_on` : request.security retourne `array<CmiZone>` en v6, pas de shift `[1]`
-// possible. La barre HTF courante peut donc flicker en temps réel — accepté, les zones se
-// stabilisent après 3 bougies HTF de validation.
+// Architecture v2 (post memory blow-up) : `request.security` ne retourne plus `array<CmiZone>`
+// (snapshot par chart-bar = explosion mémoire), mais un TUPLE de primitives (OHLC + time + signal).
+// La state machine vit en chart-context via `cmiZone.tickMtf(...)`, avec un `var array<CmiZone>`
+// par TF côté indicateur — une instance unique, mutée in place, zéro snapshot.
+//
+// Bornes d'intérêt calculées **dans le contexte chart** (et non plus dans HTF) : les bornes
+// "aujourd'hui / cette semaine / ce mois" sont alignées sur le chart, plus précis pour M5/M15.
 
-mZones   = request.security(syminfo.tickerid, "M",   cmiZone.updateOne(signal.detectCMI(), 43200, lookbackBars, cmiZone.interestStartForTf(43200, chartTz), maxZones))
-wZones   = request.security(syminfo.tickerid, "W",   cmiZone.updateOne(signal.detectCMI(), 10080, lookbackBars, cmiZone.interestStartForTf(10080, chartTz), maxZones))
-dZones   = request.security(syminfo.tickerid, "D",   cmiZone.updateOne(signal.detectCMI(), 1440,  lookbackBars, cmiZone.interestStartForTf(1440,  chartTz), maxZones))
-h4Zones  = request.security(syminfo.tickerid, "240", cmiZone.updateOne(signal.detectCMI(), 240,   lookbackBars, cmiZone.interestStartForTf(240,   chartTz), maxZones))
-h1Zones  = request.security(syminfo.tickerid, "60",  cmiZone.updateOne(signal.detectCMI(), 60,    lookbackBars, cmiZone.interestStartForTf(60,    chartTz), maxZones))
-m15Zones = request.security(syminfo.tickerid, "15",  cmiZone.updateOne(signal.detectCMI(), 15,    lookbackBars, cmiZone.interestStartForTf(15,    chartTz), maxZones))
-m5Zones  = request.security(syminfo.tickerid, "5",   cmiZone.updateOne(signal.detectCMI(), 5,     lookbackBars, cmiZone.interestStartForTf(5,     chartTz), maxZones))
+mStart   = cmiZone.interestStartForTf(43200, chartTz)
+wStart   = cmiZone.interestStartForTf(10080, chartTz)
+dStart   = cmiZone.interestStartForTf(1440,  chartTz)
+h4Start  = cmiZone.interestStartForTf(240,   chartTz)
+h1Start  = cmiZone.interestStartForTf(60,    chartTz)
+m15Start = cmiZone.interestStartForTf(15,    chartTz)
+m5Start  = cmiZone.interestStartForTf(5,     chartTz)
+
+// 7 request.security retournant chacun un tuple [open, high, low, close, time, signal HTF].
+// Pas de `lookahead_on` (la barre HTF courante peut flicker en temps réel — accepté, les zones
+// se stabilisent après 3 bougies HTF de validation).
+[mO,  mH,  mL,  mC,  mT,  mSig]  = request.security(syminfo.tickerid, "M",   [open, high, low, close, time, signal.detectCMI()])
+[wO,  wH,  wL,  wC,  wT,  wSig]  = request.security(syminfo.tickerid, "W",   [open, high, low, close, time, signal.detectCMI()])
+[dO,  dH,  dL,  dC,  dT,  dSig]  = request.security(syminfo.tickerid, "D",   [open, high, low, close, time, signal.detectCMI()])
+[h4O, h4H, h4L, h4C, h4T, h4Sig] = request.security(syminfo.tickerid, "240", [open, high, low, close, time, signal.detectCMI()])
+[h1O, h1H, h1L, h1C, h1T, h1Sig] = request.security(syminfo.tickerid, "60",  [open, high, low, close, time, signal.detectCMI()])
+[m15O,m15H,m15L,m15C,m15T,m15Sig]= request.security(syminfo.tickerid, "15",  [open, high, low, close, time, signal.detectCMI()])
+[m5O, m5H, m5L, m5C, m5T, m5Sig] = request.security(syminfo.tickerid, "5",   [open, high, low, close, time, signal.detectCMI()])
+
+// 7 collections persistantes en chart-context (1 instance par TF, mutée in place — pas de snapshot).
+var array<cmiZone.CmiZone> mZones   = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> wZones   = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> dZones   = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> h4Zones  = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> h1Zones  = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> m15Zones = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> m5Zones  = array.new<cmiZone.CmiZone>()
+
+// Tick chaque state machine. `tickMtf` détecte en interne les nouvelles barres HTF via change de
+// `htfTime` et avance le state. Ring buffer interne pour la construction lookback (l'historique
+// HTF n'est pas accessible depuis le chart-context, d'où le buffer).
+cmiZone.tickMtf(mZones,   43200, mSig,  mO,  mH,  mL,  mC,  mT,  lookbackBars, mStart,   maxZones)
+cmiZone.tickMtf(wZones,   10080, wSig,  wO,  wH,  wL,  wC,  wT,  lookbackBars, wStart,   maxZones)
+cmiZone.tickMtf(dZones,   1440,  dSig,  dO,  dH,  dL,  dC,  dT,  lookbackBars, dStart,   maxZones)
+cmiZone.tickMtf(h4Zones,  240,   h4Sig, h4O, h4H, h4L, h4C, h4T, lookbackBars, h4Start,  maxZones)
+cmiZone.tickMtf(h1Zones,  60,    h1Sig, h1O, h1H, h1L, h1C, h1T, lookbackBars, h1Start,  maxZones)
+cmiZone.tickMtf(m15Zones, 15,    m15Sig,m15O,m15H,m15L,m15C,m15T,lookbackBars, m15Start, maxZones)
+cmiZone.tickMtf(m5Zones,  5,     m5Sig, m5O, m5H, m5L, m5C, m5T, lookbackBars, m5Start,  maxZones)
 
 // Anti-chevauchement intra-TF (idempotent — recalculé à chaque chart-bar). La passe mute en place
 // le state ACTIVE/PENDING ; la lib ne retire jamais une zone non-EXPIRED, donc l'état est stable.
