@@ -1,24 +1,42 @@
 //@version=6
-// @description lib-gap — détection de gaps journaliers + statut de comblement. Couche 1. Pas de dessin.
-//              Porté de l'ancien indicateur (logique validée). La détection s'exécute sur la barre
-//              DAILY (`low`/`high` vs clôture précédente) ; le consommateur l'appelle via
-//              `request.security(ticker, "D", detectDaily())` pour afficher les gaps daily sur
-//              n'importe quel timeframe, et crée/met à jour la box lui-même (les libs ne dessinent pas).
+// @description lib-gap v7 — détection + UDT `Gap` + orchestrateur de cycle de vie complet.
+//              Couche 1, pas de dessin.
+//              Sort tout le code de gestion de gap inline du consommateur (levels.pine pré-v7) :
+//              detection sur barre daily (via request.security D) + création on day-change + check
+//              de comblement par barre du chart + FIFO sur le lookback. Le consommateur n'a plus
+//              qu'à appeler `update(maxLookback) → array<Gap>` et itérer le résultat pour rendre
+//              (pattern stateless redraw, identique aux Zones CMI).
+//
+//              `detectDaily()` et `checkFill()` deviennent des helpers privés (la v6 les exposait
+//              parce que l'orchestration vivait dans l'indicateur — pratique abolie).
 library("lib_gap", overlay = true)
 
 // ============================================================
-// Détection (contexte daily, via request.security(ticker, "D", ...))
+// UDT
 // ============================================================
 
-// @function Détecte un gap journalier sur la barre daily courante.
-//           - Haussier : `low > close[1]`  → zone [close[1], low], direction `1`.
-//           - Baissier : `high < close[1]` → zone [high, close[1]], direction `-1`.
-//           Ne détecte qu'en `timeframe.isdaily` (sinon aucun gap). La mèche de la barre daily inclut
-//           TOUT le trading du jour, donc `low > close[1]` traduit un vrai gap non comblé — pas de
-//           faux gap sur les instruments 24h (le mouvement nocturne est dans la barre daily, pas un gap),
-//           contrairement à une détection au minuit-chart.
-// @returns [hasGap (bool), top (float), bottom (float), direction (int : 1 haussier / -1 baissier / 0 aucun)]
-export detectDaily() =>
+// @type Gap — gap journalier avec orientation et ancrage temporel.
+// @field top          Borne haute (mutée si comblement partiel haussier).
+// @field bottom       Borne basse (mutée si comblement partiel baissier).
+// @field dir          Direction : `1` = haussier (gap up, low > close[1]), `-1` = baissier.
+// @field leftBarIndex `bar_index` de la barre AVANT le gap (ancre xloc.bar_index, adjacente).
+export type Gap
+    float top
+    float bottom
+    int   dir
+    int   leftBarIndex
+
+// ============================================================
+// Helpers privés
+// ============================================================
+
+// @function (privé) Détecte un gap journalier sur la barre daily courante.
+//           Haussier : `low > close[1]` → zone [close[1], low], dir = 1.
+//           Baissier : `high < close[1]` → zone [high, close[1]], dir = -1.
+//           Ne détecte qu'en `timeframe.isdaily` (sinon aucun gap). Logique validée sur
+//           instruments 24h : la mèche de la barre daily inclut tout le trading du jour, donc
+//           `low > close[1]` traduit un vrai gap (pas un faux gap au minuit-chart).
+detectDaily() =>
     bool  hasGap = false
     float top    = na
     float bottom = na
@@ -36,21 +54,12 @@ export detectDaily() =>
             dir    := -1
     [hasGap, top, bottom, dir]
 
-// ============================================================
-// Comblement (contexte du chart)
-// ============================================================
-
-// @function Statut de comblement d'un gap avec la barre courante (timeframe du chart).
-//           - Haussier (`dir = 1`) : comblement partiel si le prix entre dans la zone
-//             (`low <= top and low > bottom`) → `newTop = low` ; total si `low <= bottom`.
-//           - Baissier (`dir = -1`) : partiel si `high >= bottom and high < top` → `newBottom = high` ;
-//             total si `high >= top`.
-//           Le consommateur applique `box.set_top`/`set_bottom` (partiel) ou `box.delete` (total).
-// @param top        Bord supérieur courant du gap.
-// @param bottom     Bord inférieur courant du gap.
-// @param direction  `1` (haussier) ou `-1` (baissier).
-// @returns [isFilled (bool), isPartial (bool), newTop (float), newBottom (float)]
-export checkFill(float top, float bottom, int direction) =>
+// @function (privé) Statut de comblement d'un gap par la barre courante (timeframe du chart).
+//           Haussier (`dir = 1`) : partiel si le prix entre dans la zone
+//           (`low <= top and low > bottom`) → `newTop = low` ; total si `low <= bottom`.
+//           Baissier (`dir = -1`) : partiel si `high >= bottom and high < top` → `newBottom = high` ;
+//           total si `high >= top`.
+checkFill(float top, float bottom, int direction) =>
     bool  isFilled  = false
     bool  isPartial = false
     float newTop    = top
@@ -68,3 +77,49 @@ export checkFill(float top, float bottom, int direction) =>
         if high >= top
             isFilled := true
     [isFilled, isPartial, newTop, newBottom]
+
+// ============================================================
+// Orchestrateur de cycle de vie
+// ============================================================
+
+// @function Orchestre détection + lifecycle des gaps daily. À appeler chaque barre dans
+//           l'indicateur. La lib maintient un `var array<Gap>` interne qui contient à tout moment
+//           les gaps NON-entièrement-comblés des `maxLookback` derniers événements (FIFO).
+//
+//           À chaque appel :
+//             1. `detectDaily()` via `request.security(ticker, "D", ..., lookahead = barmerge.lookahead_on)` (anti-repaint sur barre daily fermée).
+//             2. Si `timeframe.change("D")` ET gap détecté : push un nouveau `Gap` ancré à
+//                `bar_index - 1` (barre adjacente avant le gap). FIFO si size > maxLookback.
+//             3. Iter descendant sur l'array : `checkFill` chaque Gap → retrait si total,
+//                mutation directionnelle (top ou bottom) si partiel.
+//
+//           Pas de CE10051 : `request.security`'s expression (`detectDaily()`) ne dépend pas des
+//           arguments de cette fonction exportée. `maxLookback` ne sert qu'à la FIFO post-push.
+// @param maxLookback Cap mémoire du nombre de gaps gardés (FIFO sur l'ordre d'apparition).
+// @returns array<Gap> — gaps vivants, à itérer pour rendre.
+export update(simple int maxLookback) =>
+    var array<Gap> gaps = array.new<Gap>()
+
+    [dHas, dTop, dBottom, dDir] = request.security(syminfo.tickerid, "D", detectDaily(), lookahead = barmerge.lookahead_on)
+
+    // Nouveau gap au changement de jour chart : push + FIFO trim.
+    if timeframe.change("D") and dHas
+        array.push(gaps, Gap.new(dTop, dBottom, dDir, bar_index - 1))
+        while array.size(gaps) > maxLookback
+            array.shift(gaps)
+
+    // Cycle de vie : iter descendant (pour retrait sur place).
+    n = array.size(gaps)
+    if n > 0
+        for i = n - 1 to 0
+            g = array.get(gaps, i)
+            [isFilled, isPartial, newTop, newBottom] = checkFill(g.top, g.bottom, g.dir)
+            if isFilled
+                array.remove(gaps, i)
+            else if isPartial
+                if g.dir == 1 and newTop < g.top
+                    g.top := newTop
+                if g.dir == -1 and newBottom > g.bottom
+                    g.bottom := newBottom
+
+    gaps
