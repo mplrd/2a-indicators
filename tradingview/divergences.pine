@@ -9,6 +9,7 @@ indicator(title = "2Ai Divergences", shorttitle = "Divergences", overlay = false
 // ============================================================
 // Imports
 // ============================================================
+import mpilard/lib_rsi/1        as rsi
 import mpilard/lib_stochrsi/1   as stochrsi
 import mpilard/lib_divergence/1 as divergence
 
@@ -47,15 +48,15 @@ MEDIAN = 50
 // ============================================================
 // Calculs — délégués aux libs
 // ============================================================
-rsi   = ta.rsi(indicatorSource, indicLength)
-rsiMA = ta.sma(rsi, rsiMaLength)
+rsiValue = rsi.compute(indicatorSource, indicLength)
+rsiMA    = rsi.movingAverage(rsiValue, rsiMaLength)
 
 [stochK, stochD] = stochrsi.compute(indicatorSource, indicLength, indicLength, SMOOTH, SMOOTH, false, false)
 
 // 2 passes RSI : avec bornes OB/OS (`useLimits = true`) pour les divergences classiques, sans bornes
 // (`useLimits = false`) pour la détection libre. Pattern hérité de la source v5.
-[rsiFractalTop,    rsiFractalBot,    rsiBearReg,    rsiBullReg,    rsiBearHid,    rsiBullHid]    = divergence.findDivergences(rsi, high, low, levelOverbought1, levelOversold1, true)
-[rsiFractalTopNl,  rsiFractalBotNl,  rsiBearRegNl,  rsiBullRegNl,  rsiBearHidNl,  rsiBullHidNl]  = divergence.findDivergences(rsi, high, low, 0, 0, false)
+[rsiFractalTop,    rsiFractalBot,    rsiBearReg,    rsiBullReg,    rsiBearHid,    rsiBullHid]    = divergence.findDivergences(rsiValue, high, low, levelOverbought1, levelOversold1, true)
+[rsiFractalTopNl,  rsiFractalBotNl,  rsiBearRegNl,  rsiBullRegNl,  rsiBearHidNl,  rsiBullHidNl]  = divergence.findDivergences(rsiValue, high, low, 0, 0, false)
 
 // Stoch RSI : pas de bornes (le stoch oscille déjà entre 0 et 100).
 [stochFractalTop, stochFractalBot, stochBearReg, stochBullReg, stochBearHid, stochBullHid] = divergence.findDivergences(stochK, high, low, 0, 0, false)
@@ -66,13 +67,13 @@ rsiMA = ta.sma(rsi, rsiMaLength)
 // Reprise tel quel du pattern source : on colore le RSI en rouge / vert quand il passe au-delà des
 // seuils ET que la barre précédente y était déjà (= confirmation, pas un simple flash).
 rsiColor = color.gray
-if rsi < levelOversold2 and rsi[1] <= levelOversold2
+if rsiValue < levelOversold2 and rsiValue[1] <= levelOversold2
     rsiColor := color.green
-else if rsi < levelOversold1 and rsi[1] <= levelOversold1
+else if rsiValue < levelOversold1 and rsiValue[1] <= levelOversold1
     rsiColor := color.green
-else if rsi > levelOverbought2 and rsi[1] >= levelOverbought2
+else if rsiValue > levelOverbought2 and rsiValue[1] >= levelOverbought2
     rsiColor := color.red
-else if rsi > levelOverbought1 and rsi[1] >= levelOverbought1
+else if rsiValue > levelOverbought1 and rsiValue[1] >= levelOverbought1
     rsiColor := color.red
 
 rsiBearDivColor = (rsiShowDiv and rsiBearReg) or (rsiShowHiddenDiv and rsiBearHid) ? color.rgb(170, 0, 0, 0) : na
@@ -93,9 +94,9 @@ lineOversold2   = hline(levelOversold2,   title = "Oversold level 2",   color = 
 // ============================================================
 // Rendu — RSI + divergences + MA + gradient fill OB/OS
 // ============================================================
-rsiplot = plot(rsiShow ? rsi : na, title = "RSI", color = rsiColor, linewidth = 2, display = rsiShow ? display.all : display.none)
-plot(series = rsiFractalTop ? rsi[2] : na, title = "RSI Bearish Divergence", color = rsiBearDivColor, linewidth = 3, offset = -2, display = rsiShow ? display.all : display.none)
-plot(series = rsiFractalBot ? rsi[2] : na, title = "RSI Bullish Divergence", color = rsiBullDivColor, linewidth = 3, offset = -2, display = rsiShow ? display.all : display.none)
+rsiplot = plot(rsiShow ? rsiValue : na, title = "RSI", color = rsiColor, linewidth = 2, display = rsiShow ? display.all : display.none)
+plot(series = rsiFractalTop ? rsiValue[2] : na, title = "RSI Bearish Divergence", color = rsiBearDivColor, linewidth = 3, offset = -2, display = rsiShow ? display.all : display.none)
+plot(series = rsiFractalBot ? rsiValue[2] : na, title = "RSI Bullish Divergence", color = rsiBullDivColor, linewidth = 3, offset = -2, display = rsiShow ? display.all : display.none)
 plot(series = rsiMA, title = "RSI MA", color = color.blue, display = rsiShow and rsiShowMa ? display.all : display.none)
 
 midLinePlot = plot(MEDIAN, color = na, editable = false, display = display.none)
