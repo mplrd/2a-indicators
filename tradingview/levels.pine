@@ -11,7 +11,7 @@ indicator("2Ai Levels", shorttitle = "Levels", overlay = true, max_lines_count =
 import mpilard/lib_levels/12    as levels
 import mpilard/lib_draw/17      as draw
 import mpilard/lib_supertrend/1 as st
-import mpilard/lib_bollinger/3  as bb
+import mpilard/lib_bollinger/4  as bb
 import mpilard/lib_structure/3  as structure
 import mpilard/lib_gap/7        as gap
 

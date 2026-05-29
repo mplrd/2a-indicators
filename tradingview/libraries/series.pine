@@ -56,3 +56,30 @@ export projectMean(series float src, simple int length, simple int barsAhead) =>
     for i = 1 to barsAhead
         sumDropped := sumDropped + nz(src[length - i])
     ta.sma(src, length) + (barsAhead * src - sumDropped) / length
+
+// ============================================================
+// Fractales (Bill Williams) — pivot 5 bougies sur `src[2]`
+// ============================================================
+
+// @function Vrai si `src[2]` est un sommet local sur la fenêtre [src[0], ..., src[4]] —
+//           "top fractal" Bill Williams. Pattern strict :
+//             `src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]`.
+// @returns series bool.
+export fractalTop(series float src) =>
+    src[4] < src[2] and src[3] < src[2] and src[2] > src[1] and src[2] > src[0]
+
+// @function Vrai si `src[2]` est un creux local sur la fenêtre [src[0], ..., src[4]] —
+//           "bot fractal" Bill Williams. Pattern strict miroir de `fractalTop`.
+// @returns series bool.
+export fractalBot(series float src) =>
+    src[4] > src[2] and src[3] > src[2] and src[2] < src[1] and src[2] < src[0]
+
+// @function Encode l'état fractal de `src[2]` en un int signé : +1 (top), -1 (bot), 0 (rien).
+//           Pratique pour stocker / comparer le type de pivot détecté.
+//           Appels hoistés hors du ternaire (sinon `fractalBot` court-circuité quand `fractalTop`
+//           est vrai → CW10004, cohérence d'historique compromise).
+// @returns series int.
+export fractalize(series float src) =>
+    bool top = fractalTop(src)
+    bool bot = fractalBot(src)
+    top ? 1 : bot ? -1 : 0

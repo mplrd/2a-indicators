@@ -1,0 +1,26 @@
+//@version=6
+// @description lib-rsi — RSI (Wilder 1978) et ses helpers. Couche 1, ne dessine pas.
+//              Source unique pour la computation RSI dans le projet — toute lib ou indicateur qui
+//              a besoin du RSI passe par ici, plutôt que d'appeler `ta.rsi()` inline (cohérence
+//              avec `lib_macd` et `lib_stochrsi`, portage cross-platform facilité).
+library("lib_rsi", overlay = false)
+
+// ============================================================
+// Compute
+// ============================================================
+
+// @function RSI (Wilder 1978) — oscillateur de momentum borné [0, 100]. Wrapper de `ta.rsi`.
+// @param src    Série source (typiquement close).
+// @param length Période RSI.
+// @returns series float dans [0, 100].
+export compute(series float src, simple int length) =>
+    ta.rsi(src, length)
+
+// @function Moyenne mobile simple appliquée au RSI — la "RSI MA" qui sert de référence pour
+//           identifier les retournements de tendance du RSI lui-même. Wrapper sémantique de
+//           `ta.sma(rsi, length)` pour rester dans le domaine RSI.
+// @param rsi    Série RSI (typiquement issue de `compute()`).
+// @param length Période de la SMA.
+// @returns series float.
+export movingAverage(series float rsi, simple int length) =>
+    ta.sma(rsi, length)
