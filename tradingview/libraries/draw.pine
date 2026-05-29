@@ -244,3 +244,201 @@ export drawZoneBox(series bool show, series bool isActive, int leftTime, float t
               force_overlay = true)
             array.push(labelArr, lb)
     bx
+
+// ============================================================
+// Gaps — rendu d'un gap journalier en `box` (primitive, ancrée en bar_index)
+// ============================================================
+
+// @function Dessine un gap en `box` rectangulaire. Ancre `xloc.bar_index` (différent de `drawZoneBox`
+//           qui est en `xloc.bar_time`) car le gap est positionné par rapport à la barre adjacente
+//           qui le précède. Pas de bordure (`border_color = na`), juste un fond avec transparence.
+//           Étendu à droite (extend.right) pour rester visible tant que le gap n'est pas comblé.
+// @param show         Toggle global.
+// @param leftBarIndex `bar_index` de la barre AVANT le gap (ancre adjacente).
+// @param top          Borne haute.
+// @param bottom       Borne basse.
+// @param col          Couleur de fond.
+// @param bgAlpha      Transparence du fond (0 = opaque, 100 = invisible).
+// @param boxArr       Array des boxes (push uniquement, le caller gère le nettoyage).
+// @returns series box — la box créée ou `na`.
+export drawGapBox(series bool show, int leftBarIndex, float top, float bottom, series color col, simple int bgAlpha, array<box> boxArr) =>
+    box bx = na
+    if show and not na(leftBarIndex) and not na(top) and not na(bottom)
+        bx := box.new(
+          left = leftBarIndex, top = top, right = bar_index, bottom = bottom,
+          xloc = xloc.bar_index,
+          border_color = na,
+          bgcolor = color.new(col, bgAlpha),
+          extend = extend.right,
+          force_overlay = true)
+        array.push(boxArr, bx)
+    bx
+
+// ============================================================
+// Projections — lignes pointillées de projection (MA/BB futures)
+// ============================================================
+
+// @function Dessine une ligne pointillée de projection entre deux points en `xloc.bar_index`.
+//           Style hardcodé `line.style_dotted` (les projections sont conventionnellement en pointillé).
+// @param show     Toggle global.
+// @param x1       bar_index gauche.
+// @param y1       Prix gauche.
+// @param x2       bar_index droite (typiquement bar_index + barsAhead).
+// @param y2       Prix droite (valeur projetée).
+// @param col      Couleur de ligne.
+// @param width    Épaisseur (1-5).
+// @param lineArr  Array des lignes (push).
+// @returns series line — la ligne créée ou `na`.
+export drawProjection(series bool show, int x1, float y1, int x2, float y2, series color col, simple int width, array<line> lineArr) =>
+    line ln = na
+    if show and not na(y1) and not na(y2)
+        ln := line.new(x1, y1, x2, y2, xloc = xloc.bar_index, color = col, style = line.style_dotted, width = width, force_overlay = true)
+        array.push(lineArr, ln)
+    ln
+
+// ============================================================
+// Cleanup — suppression FIFO d'arrays d'objets graphiques
+// ============================================================
+
+// @function Supprime toutes les boxes de `boxArr` (box.delete + array.clear). À appeler en début
+//           de bloc de rendu islast pour repartir d'une collection vide avant de re-pousser.
+// @param boxArr Array des boxes (mutation in place).
+export clearBoxes(array<box> boxArr) =>
+    for bx in boxArr
+        box.delete(bx)
+    array.clear(boxArr)
+
+// @function Supprime toutes les lignes de `lineArr` (line.delete + array.clear).
+// @param lineArr Array des lignes (mutation in place).
+export clearLines(array<line> lineArr) =>
+    for ln in lineArr
+        line.delete(ln)
+    array.clear(lineArr)
+
+// @function Supprime tous les labels de `labelArr` (label.delete + array.clear).
+// @param labelArr Array des labels (mutation in place).
+export clearLabels(array<label> labelArr) =>
+    for lb in labelArr
+        label.delete(lb)
+    array.clear(labelArr)
+
+// ============================================================
+// Bollinger — wrappers `plot` + `fill` pour le pattern ribbon/lines
+// ============================================================
+// NB : Pine v6 exige `input plot_line_style` pour `plot(..., linestyle = ...)`. Une lib ne peut
+//      pas qualifier ses params `input` (CE10160), et un `simple plot_line_style` calculé en interne
+//      est refusé par plot (CE10123). Solution : 2 helpers, un par mode, avec linestyle hardcodé en
+//      const directement dans `plot(...)`. L'indicateur choisit via `if/else` (chaque branche appelle
+//      le même nombre de plot avec les mêmes titres → Pine accepte).
+
+// @function Dessine une paire de bandes Bollinger en mode RIBBON : outer SOLID + accent + inner
+//           SOLID + fill semi-opaque entre outer et inner (haut + bas). 8 calls (6 plot + 2 fill).
+// @param titlePrefix    Préfixe des titres (ex : "BBc", "BBm" — différencie les plots dans la data window).
+// @param outerU         Série outer upper.
+// @param outerL         Série outer lower.
+// @param innerU         Série inner upper.
+// @param innerL         Série inner lower.
+// @param outerCol       Couleur des bandes outer (base).
+// @param accentUCol     Couleur de l'accent haut (appliquée quand la bande est plate/closing).
+// @param accentLCol     Couleur de l'accent bas.
+// @param innerCol       Couleur des bandes inner.
+// @param fillUCol       Couleur de remplissage haute (avant transparence).
+// @param fillLCol       Couleur de remplissage basse.
+// @param fillUAlpha     Transparence du fill haut (0-100).
+// @param fillLAlpha     Transparence du fill bas.
+// @param outerWidth     Épaisseur des outer + inner.
+// @param accentWidth    Épaisseur des accents.
+// @param outerDisplay   Display.all / display.none — visibilité globale du bloc.
+// @param innerDisplay   Display des bandes inner (pour distinguer ribbon-visible vs ribbon-mais-inner-caché).
+export plotBollingerRibbon(simple string titlePrefix, series float outerU, series float outerL, series float innerU, series float innerL, series color outerCol, series color accentUCol, series color accentLCol, series color innerCol, series color fillUCol, series color fillLCol, simple int fillUAlpha, simple int fillLAlpha, simple int outerWidth, simple int accentWidth, simple plot_display outerDisplay, simple plot_display innerDisplay) =>
+    pOuterU = plot(outerU, titlePrefix + " outer high", color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = outerDisplay)
+    pOuterL = plot(outerL, titlePrefix + " outer low",  color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = outerDisplay)
+    plot(outerU, titlePrefix + " accent high", color = accentUCol, linewidth = accentWidth, display = outerDisplay)
+    plot(outerL, titlePrefix + " accent low",  color = accentLCol, linewidth = accentWidth, display = outerDisplay)
+    pInnerU = plot(innerU, titlePrefix + " inner high", color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = innerDisplay, editable = false)
+    pInnerL = plot(innerL, titlePrefix + " inner low",  color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_solid, display = innerDisplay, editable = false)
+    fill(pOuterU, pInnerU, color = color.new(fillUCol, fillUAlpha), title = titlePrefix + " ribbon high", display = outerDisplay)
+    fill(pOuterL, pInnerL, color = color.new(fillLCol, fillLAlpha), title = titlePrefix + " ribbon low",  display = outerDisplay)
+
+// @function Variante "lignes" de `plotBollingerRibbon` : outer DOTTED + accent + inner DOTTED + pas
+//           de fill (color = na). Même nombre de plot/fill et mêmes titres → compatible avec un
+//           if/else cote indicateur qui dispatche entre les deux modes.
+export plotBollingerLines(simple string titlePrefix, series float outerU, series float outerL, series float innerU, series float innerL, series color outerCol, series color accentUCol, series color accentLCol, series color innerCol, simple int outerWidth, simple int accentWidth, simple plot_display outerDisplay, simple plot_display innerDisplay) =>
+    pOuterU = plot(outerU, titlePrefix + " outer high", color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = outerDisplay)
+    pOuterL = plot(outerL, titlePrefix + " outer low",  color = outerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = outerDisplay)
+    plot(outerU, titlePrefix + " accent high", color = accentUCol, linewidth = accentWidth, display = outerDisplay)
+    plot(outerL, titlePrefix + " accent low",  color = accentLCol, linewidth = accentWidth, display = outerDisplay)
+    pInnerU = plot(innerU, titlePrefix + " inner high", color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = innerDisplay, editable = false)
+    pInnerL = plot(innerL, titlePrefix + " inner low",  color = innerCol, linewidth = outerWidth, linestyle = plot.linestyle_dotted, display = innerDisplay, editable = false)
+    fill(pOuterU, pInnerU, color = na, title = titlePrefix + " ribbon high", display = outerDisplay)
+    fill(pOuterL, pInnerL, color = na, title = titlePrefix + " ribbon low",  display = outerDisplay)
+
+// ============================================================
+// MA — wrappers `plot` + `fill` pour le pattern ribbon/lines (1 basis + 2 invisibles + 1 fill)
+// ============================================================
+
+// @function Dessine une MA en mode RIBBON : basis SOLID + 2 plots invisibles (upper/lower bands) +
+//           fill semi-opaque entre les 2. 4 calls. Pattern identique pour MA7/20/50/200.
+// @param title       Titre du basis (ex : "MA7"). Les invisibles auront `title + "_U"` / `_L`.
+// @param basis       Série basis (SMA).
+// @param upperBand   Série upper band (basis + std).
+// @param lowerBand   Série lower band (basis - std).
+// @param col         Couleur du basis (et du fill avant transparence).
+// @param width       Épaisseur du basis.
+// @param fillAlpha   Transparence du fill ribbon.
+// @param display     Display.all / display.none — visibilité globale.
+export plotMARibbon(simple string title, series float basis, series float upperBand, series float lowerBand, series color col, simple int width, simple int fillAlpha, simple plot_display display) =>
+    plot(basis, title, color = col, linewidth = width, linestyle = plot.linestyle_solid, display = display)
+    pU = plot(upperBand, title + "_U", color = na, display = display.none, editable = false)
+    pL = plot(lowerBand, title + "_L", color = na, display = display.none, editable = false)
+    fill(pU, pL, color = color.new(col, fillAlpha), title = title + " fill", display = display)
+
+// @function Variante "lignes" de `plotMARibbon` : basis DOTTED + 2 invisibles + fill = na.
+//           Même structure de calls (4) → compatible if/else en indicateur.
+export plotMALines(simple string title, series float basis, series float upperBand, series float lowerBand, series color col, simple int width, simple plot_display display) =>
+    plot(basis, title, color = col, linewidth = width, linestyle = plot.linestyle_dotted, display = display)
+    pU = plot(upperBand, title + "_U", color = na, display = display.none, editable = false)
+    pL = plot(lowerBand, title + "_L", color = na, display = display.none, editable = false)
+    fill(pU, pL, color = na, title = title + " fill", display = display)
+
+// ============================================================
+// Ichimoku — wrapper plot Tenkan / Kijun / Senkou A / Senkou B / Chikou + fill Kumo
+// ============================================================
+
+// @function Dessine les 5 lignes Ichimoku + le Kumo (fill Senkou A vs B). Tenkan/Kijun/Chikou en
+//           SOLID, Senkou A/B en SOLID décalés `kijunOffset` barres en avant, fill Kumo entre A et B.
+//           Chikou décalé `-kijunOffset` barres en arrière.
+// @param tenkan       Série Tenkan.
+// @param kijun        Série Kijun.
+// @param senkouA      Série Senkou Span A.
+// @param senkouB      Série Senkou Span B.
+// @param chikou       Série Chikou Span.
+// @param tenkanCol    Couleur Tenkan.
+// @param kijunCol     Couleur Kijun.
+// @param senkouACol   Couleur Senkou A.
+// @param senkouBCol   Couleur Senkou B.
+// @param kumoCol      Couleur du fill Kumo (déjà avec transparence).
+// @param chikouCol    Couleur Chikou.
+// @param kijunOffset  Période Kijun (pour le décalage des Senkou et du Chikou).
+// @param mainDisplay  Display global (Tenkan/Kijun/Senkou).
+// @param chikouDisplay Display Chikou (peut être indépendant).
+export plotIchimoku(series float tenkan, series float kijun, series float senkouA, series float senkouB, series float chikou, series color tenkanCol, series color kijunCol, series color senkouACol, series color senkouBCol, series color kumoCol, series color chikouCol, simple int kijunOffset, simple plot_display mainDisplay, simple plot_display chikouDisplay) =>
+    plot(tenkan, "Tenkan", color = tenkanCol, linewidth = 1, display = mainDisplay)
+    plot(kijun,  "Kijun",  color = kijunCol,  linewidth = 1, display = mainDisplay)
+    pSenkouA = plot(senkouA, "Senkou A", color = senkouACol, linewidth = 1, offset = kijunOffset, display = mainDisplay)
+    pSenkouB = plot(senkouB, "Senkou B", color = senkouBCol, linewidth = 1, offset = kijunOffset, display = mainDisplay)
+    fill(pSenkouA, pSenkouB, color = kumoCol, title = "Kumo", display = mainDisplay)
+    plot(chikou, "Chikou", color = chikouCol, linewidth = 1, offset = -kijunOffset, display = chikouDisplay)
+
+// ============================================================
+// Supertrend — wrapper plot en style linebr
+// ============================================================
+
+// @function Dessine la ligne Supertrend avec interruption (`plot.style_linebr`) — la ligne s'interrompt
+//           sur les changements de direction (les `na` ne sont pas connectés).
+// @param value    Série Supertrend (mise à `na` en dehors du contexte d'affichage par le caller).
+// @param col      Couleur (typiquement bull/bear selon dir).
+// @param width    Épaisseur.
+// @param display  Display.all / display.none.
+export plotSupertrend(series float value, series color col, simple int width, simple plot_display display) =>
+    plot(value, "Supertrend", color = col, linewidth = width, style = plot.style_linebr, display = display)
