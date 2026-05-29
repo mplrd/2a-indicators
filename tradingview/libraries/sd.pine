@@ -6,7 +6,7 @@
 //              que l'orchestration du rendu.
 library("lib_sd", overlay = true)
 
-import mpilard/lib_zone/1   as zone
+import mpilard/lib_zone/2   as zone
 import mpilard/lib_signal/2 as signal
 
 // @function Met à jour la collection de zones S/D pour la barre courante.

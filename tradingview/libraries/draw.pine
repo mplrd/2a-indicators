@@ -3,8 +3,9 @@
 //              Couche 2 (aucune logique métier, dessine ce qu'on lui passe).
 library("lib_draw", overlay = true)
 
-// Import lib_zone pour drawZone — lib_zone doit être publiée AVANT de pouvoir bump lib_draw.
-import mpilard/lib_zone/1 as zone
+// Pas d'import UDT — `drawZoneBox` prend des primitives (left/top/bottom/isActive) plutôt qu'un
+// type concret. lib_draw reste agnostique de `lib_zone` / `lib_cmi_zone` ; les callers déballent
+// leur UDT au call site. Plus simple à porter sur cTrader/MT4 ensuite.
 
 // ============================================================
 // Styles de ligne — enum + helpers
@@ -17,13 +18,6 @@ export enum LineStyle
     SOLID  = "⎯⎯⎯"
     DASHED = "----"
     DOTTED = "····"
-
-// @function Convertit une valeur `LineStyle` en constante Pine `line.style_*` pour `line.new()` / `hline()`.
-//           `line.new()` accepte un style en `series`, donc un retour `simple` depuis une lib passe sans souci.
-// @param s Style désiré.
-// @returns Constante de style de ligne pour line.new.
-export lineStyle(simple LineStyle s = LineStyle.SOLID) =>
-    s == LineStyle.DASHED ? line.style_dashed : s == LineStyle.DOTTED ? line.style_dotted : line.style_solid
 
 // NB — pas d'équivalent `plotLineStyle()` exportable depuis cette lib :
 //      `plot(..., linestyle = ...)` exige un `input plot_line_style`. Or Pine n'autorise pas le
@@ -38,13 +32,6 @@ export lineStyle(simple LineStyle s = LineStyle.SOLID) =>
 // ============================================================
 // Couleurs
 // ============================================================
-
-// @function Applique une transparence à une couleur (0 = opaque, 100 = invisible).
-// @param c     Couleur source.
-// @param alpha Transparence Pine (0-100).
-// @returns Nouvelle couleur avec la transparence appliquée.
-export withAlpha(series color c, simple int alpha) =>
-    color.new(c, alpha)
 
 // @function Couleur d'une bande Bollinger selon son état (plate / en fermeture) et son côté (haute / basse).
 //           Quand la bande est ouverte → baseColor. Quand elle est plate ou en fermeture → bull (bande basse)
@@ -64,17 +51,15 @@ export bandColor(series color baseColor, series color bullColor, series color be
 // Niveaux horizontaux — choix start / extension
 // ============================================================
 
-// @function Détermine où commencer une ligne de niveau et avec quelle extension :
-//           - Si le point d'origine est connu, valide, et dans les `MAX_LOOKBACK` dernières barres
+// @function (privé) Détermine où commencer une ligne de niveau et avec quelle extension :
+//           - Si le point d'origine est connu, valide, et dans les 365 dernières barres
 //             → la ligne part de `startBar` et s'étend à droite (`extend.right`).
 //           - Sinon (origine inconnue, trop ancienne, ou hors plage du chart courant)
 //             → la ligne part de la barre courante et s'étend des deux côtés (`extend.both`).
 //           Ce pattern permet de toujours dessiner un niveau même quand sa barre d'origine
 //           n'est pas visible dans la TF courante (ex : ATH atteint il y a des années).
-// @param startBar      Index de la barre d'origine (peut être `na` si inconnu).
-// @param startBarFound Drapeau indiquant si l'origine est connue et tracable.
-// @returns Tuple [startX, extendMode] à passer directement à `line.new(x1 = startX, extend = extendMode, ...)`.
-export resolveLevelStartAndExtend(series int startBar, series bool startBarFound) =>
+//           Utilisé en interne par `drawLevel`.
+resolveLevelStartAndExtend(series int startBar, series bool startBarFound) =>
     drawable = startBarFound and not na(startBar) and startBar >= 0 and startBar <= bar_index and (bar_index - startBar) <= 365
     [drawable ? startBar : bar_index, drawable ? extend.right : extend.both]
 
@@ -196,30 +181,37 @@ export drawSessionLevel(series bool show, float price, int startTime, int endTim
     ln
 
 // ============================================================
-// Zones — rendu d'une `lib_zone.Zone` en `box`
+// Zones — rendu d'un rectangle en `box` (primitive agnostique du type d'origine)
 // ============================================================
 
-// @function Dessine une `Zone` en `box` rectangulaire. Box ancrée à `z.leftTime`, étendue à droite.
-//           Ne dessine RIEN si la zone n'est pas `active` (cf. `lib_zone.isActive`).
-//           Le label (optionnel) est placé à droite du chart, centré verticalement sur la zone.
-// @param show         Toggle global.
-// @param z            Zone à dessiner (cf. `lib_zone.Zone`).
+// @function Dessine un rectangle (box) ancré à `leftTime`, étendu à droite. Ne dessine RIEN si
+//           `show` est faux ou si `isActive` est faux ou si une coordonnée est `na`. Le label
+//           (optionnel) est placé à droite du chart, centré verticalement sur la zone.
+//           Cette primitive est agnostique du type UDT (Zone, CmiZone, futurs) : le caller
+//           déballe son UDT et passe les champs en primitives. Évite la duplication entre
+//           `drawZone(z.Zone)` et `drawCmiZone(cz.CmiZone)`.
+// @param show         Toggle global (peut intégrer un filtre côté caller).
+// @param isActive     true = la zone est encore vivante (caller : `zone.isActive(z)` ou
+//                     `cz.state == cmiZone.CmiState.ACTIVE`).
+// @param leftTime     Timestamp ms de la barre d'origine (xloc.bar_time).
+// @param top          Borne haute du rectangle.
+// @param bottom       Borne basse du rectangle.
 // @param col          Couleur de bordure et fond.
-// @param borderWidth  Épaisseur de bordure (0 = bordure invisible).
+// @param borderWidth  Épaisseur de bordure (0 = invisible).
 // @param borderStyle  Style de bordure (`LineStyle.SOLID` / `DASHED` / `DOTTED`).
 // @param bgAlpha      Transparence du fond (0 = opaque, 100 = invisible).
 // @param borderAlpha  Transparence de la bordure.
 // @param showLbl      Toggle d'affichage du label.
-// @param lbl          Texte du label (ex : "S/D bull", "FVG bear"). `""` = pas de label même si `showLbl=true`.
+// @param lbl          Texte du label (ex : "S/D bull"). `""` = pas de label même si `showLbl=true`.
 // @param boxArr       Array des boxes (push uniquement, le caller gère le nettoyage).
 // @param labelArr     Array des labels (push uniquement).
 // @returns series box — la box créée ou `na`.
-export drawZone(series bool show, zone.Zone z, series color col, simple int borderWidth, simple LineStyle borderStyle, simple int bgAlpha, simple int borderAlpha, simple bool showLbl, series string lbl, array<box> boxArr, array<label> labelArr) =>
+export drawZoneBox(series bool show, series bool isActive, int leftTime, float top, float bottom, series color col, simple int borderWidth, simple LineStyle borderStyle, simple int bgAlpha, simple int borderAlpha, simple bool showLbl, series string lbl, array<box> boxArr, array<label> labelArr) =>
     box bx = na
-    if show and not na(z) and zone.isActive(z)
+    if show and isActive and not na(leftTime) and not na(top) and not na(bottom)
         oneBarMs = timeframe.in_seconds() * 1000
         bx := box.new(
-          left = z.leftTime, top = z.top, right = time + oneBarMs * 5, bottom = z.bottom,
+          left = leftTime, top = top, right = time + oneBarMs * 5, bottom = bottom,
           xloc = xloc.bar_time,
           border_color = color.new(col, borderAlpha),
           bgcolor = color.new(col, bgAlpha),
@@ -230,9 +222,111 @@ export drawZone(series bool show, zone.Zone z, series color col, simple int bord
         array.push(boxArr, bx)
         if showLbl and lbl != ""
             lb = label.new(
-              x = bar_index + 20, y = (z.top + z.bottom) / 2.0, text = lbl,
+              x = bar_index + 20, y = (top + bottom) / 2.0, text = lbl,
               xloc = xloc.bar_index, style = label.style_label_center,
               color = col, textcolor = color.white, size = size.small,
               force_overlay = true)
             array.push(labelArr, lb)
     bx
+
+// ============================================================
+// Gaps — rendu d'un gap journalier en `box` (primitive, ancrée en bar_index)
+// ============================================================
+
+// @function Dessine un gap en `box` rectangulaire. Ancre `xloc.bar_index` (différent de `drawZoneBox`
+//           qui est en `xloc.bar_time`) car le gap est positionné par rapport à la barre adjacente
+//           qui le précède. Pas de bordure (`border_color = na`), juste un fond avec transparence.
+//           Étendu à droite (extend.right) pour rester visible tant que le gap n'est pas comblé.
+// @param show         Toggle global.
+// @param leftBarIndex `bar_index` de la barre AVANT le gap (ancre adjacente).
+// @param top          Borne haute.
+// @param bottom       Borne basse.
+// @param col          Couleur de fond.
+// @param bgAlpha      Transparence du fond (0 = opaque, 100 = invisible).
+// @param boxArr       Array des boxes (push uniquement, le caller gère le nettoyage).
+// @returns series box — la box créée ou `na`.
+export drawGapBox(series bool show, int leftBarIndex, float top, float bottom, series color col, simple int bgAlpha, array<box> boxArr) =>
+    box bx = na
+    if show and not na(leftBarIndex) and not na(top) and not na(bottom)
+        bx := box.new(
+          left = leftBarIndex, top = top, right = bar_index, bottom = bottom,
+          xloc = xloc.bar_index,
+          border_color = na,
+          bgcolor = color.new(col, bgAlpha),
+          extend = extend.right,
+          force_overlay = true)
+        array.push(boxArr, bx)
+    bx
+
+// ============================================================
+// Projections — lignes pointillées de projection (MA/BB futures)
+// ============================================================
+
+// @function Dessine une ligne pointillée de projection entre deux points en `xloc.bar_index`.
+//           Style hardcodé `line.style_dotted` (les projections sont conventionnellement en pointillé).
+// @param show     Toggle global.
+// @param x1       bar_index gauche.
+// @param y1       Prix gauche.
+// @param x2       bar_index droite (typiquement bar_index + barsAhead).
+// @param y2       Prix droite (valeur projetée).
+// @param col      Couleur de ligne.
+// @param width    Épaisseur (1-5).
+// @param lineArr  Array des lignes (push).
+// @returns series line — la ligne créée ou `na`.
+export drawProjection(series bool show, int x1, float y1, int x2, float y2, series color col, simple int width, array<line> lineArr) =>
+    line ln = na
+    if show and not na(y1) and not na(y2)
+        ln := line.new(x1, y1, x2, y2, xloc = xloc.bar_index, color = col, style = line.style_dotted, width = width, force_overlay = true)
+        array.push(lineArr, ln)
+    ln
+
+// ============================================================
+// Cleanup — suppression FIFO d'arrays d'objets graphiques
+// ============================================================
+
+// @function Supprime toutes les boxes de `boxArr` (box.delete + array.clear). À appeler en début
+//           de bloc de rendu islast pour repartir d'une collection vide avant de re-pousser.
+// @param boxArr Array des boxes (mutation in place).
+export clearBoxes(array<box> boxArr) =>
+    for bx in boxArr
+        box.delete(bx)
+    array.clear(boxArr)
+
+// @function Supprime toutes les lignes de `lineArr` (line.delete + array.clear).
+// @param lineArr Array des lignes (mutation in place).
+export clearLines(array<line> lineArr) =>
+    for ln in lineArr
+        line.delete(ln)
+    array.clear(lineArr)
+
+// @function Supprime tous les labels de `labelArr` (label.delete + array.clear).
+// @param labelArr Array des labels (mutation in place).
+export clearLabels(array<label> labelArr) =>
+    for lb in labelArr
+        label.delete(lb)
+    array.clear(labelArr)
+
+// ============================================================
+// Plots de bandes (BB / MA) — NON wrappés en lib
+// ============================================================
+// Note : Pine v6 exige `input plot_line_style` pour `plot(..., linestyle = ...)`. Une lib ne peut
+//        pas qualifier ses params `input` (CE10160), et un `simple plot_line_style` calculé en
+//        interne est refusé par plot (CE10123). Tant que l'indicateur expose un input.enum de
+//        style à l'utilisateur, le `plot(linestyle = ...)` doit rester au call site — c'est une
+//        contrainte plateforme, pas un manque de discipline. Les helpers `plotBollingerRibbon`,
+//        `plotBollingerLines`, `plotMARibbon`, `plotMALines` (esquissés en v17 puis retirés) ne
+//        couvrent en pratique qu'un cas où le style serait câblé dans la lib — pas applicable
+//        ici. À réintroduire si un futur indicateur a un design qui s'en accommode.
+
+// ============================================================
+// Plots avec `display` ou `linestyle` configurable — NON wrappables
+// ============================================================
+// Pine v6 exige `input plot_display` pour `plot(..., display = ...)` (CE10123) et
+// `input plot_line_style` pour `plot(..., linestyle = ...)`. Or :
+//   - Une lib ne peut pas qualifier ses params `input` (CE10160) — uniquement `simple` ou `series`.
+//   - Un `simple bool ? const : const` produit du `simple plot_simple_display`, refusé.
+//   - `plot_display` n'est même plus un keyword de type valide en v6 (CE10149).
+// Conséquence : tout plot avec display ou linestyle dynamique DOIT rester inline dans l'indicateur.
+// Ichimoku (display dynamique via toggle/chikouOnly) et Supertrend (display dynamique via toggle)
+// avaient été esquissés ici puis retirés pour cette raison. Pas de duplication à factoriser tant
+// que cette contrainte tient.

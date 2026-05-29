@@ -194,6 +194,165 @@ export updateOne(signal.SignalKind cmiSignal, int tfMinutes, int lookbackBars,
     zones
 
 // ============================================================
+// State machine MTF (chart-context) — version `tickMtf`
+// ============================================================
+// Pourquoi un 2e entry point ? Wrapper `updateOne` dans un `request.security` côté indicateur
+// retourne un `array<CmiZone>` snapshoté **par chart-bar** en série Pine → 7 TFs × N chart-bars ×
+// jusqu'à `maxZones` zones × ~50 octets/zone = explosion mémoire garantie. `tickMtf` corrige ça :
+// le `var array<CmiZone>` vit en chart-context **chez le caller** (passé en in/out), une instance
+// par TF et pas de snapshot. La lib n'absorbe via `request.security` qu'un tuple de primitives
+// (OHLC + time + SignalKind enum), coût série marginal.
+
+// @function (privé) Construit la CmiZone d'une PendingCMI validée en chart-context à partir d'un
+//           ring buffer des dernières barres HTF (au lieu d'accéder à `open[off]` / etc. qui ne
+//           sont pas disponibles depuis le contexte chart). À l'instant de validation,
+//           `barsLeft == 0` → la CMI était il y a 3 nouvelles barres HTF → elle est à l'index 3
+//           du ring buffer (index 0 = barre HTF la plus récente). On parcourt `lookbackBars` à
+//           partir de l'index 3 (CMI bar + bars antérieures jusqu'à lookbackBars-1).
+//           Retourne `na` si lookbackBars <= 0 ou si aucune barre buffer n'est valide.
+constructZoneFromBuffer(PendingCMI p, simple int lookbackBars, simple int tfMinutes,
+  array<float> bufO, array<float> bufH, array<float> bufL, array<float> bufC, array<int> bufT) =>
+    CmiZone result = na
+    if lookbackBars > 0
+        int   startIdx    = 3   // CMI bar dans le buffer à l'instant de validation
+        float topPrice    = na
+        float bottomPrice = na
+        int   topTime     = na
+        int   bottomTime  = na
+        for k = 0 to lookbackBars - 1
+            int idx = startIdx + k
+            if idx < 8
+                float o = array.get(bufO, idx)
+                float c = array.get(bufC, idx)
+                float h = array.get(bufH, idx)
+                float l = array.get(bufL, idx)
+                int   t = array.get(bufT, idx)
+                if not na(o)
+                    if p.side == CmiSide.BULL
+                        float bodyLow = math.min(o, c)
+                        if na(topPrice) or bodyLow < topPrice
+                            topPrice := bodyLow
+                            topTime  := t
+                        if na(bottomPrice) or l < bottomPrice
+                            bottomPrice := l
+                            bottomTime  := t
+                    else
+                        if na(topPrice) or h > topPrice
+                            topPrice := h
+                            topTime  := t
+                        float bodyHigh = math.max(o, c)
+                        if na(bottomPrice) or bodyHigh > bottomPrice
+                            bottomPrice := bodyHigh
+                            bottomTime  := t
+        if not na(topPrice) and not na(bottomPrice)
+            int leftT = math.min(topTime, bottomTime)
+            result := CmiZone.new(topPrice, bottomPrice, leftT, p.side, CmiState.ACTIVE, tfMinutes, p.open)
+    result
+
+// @function State machine MTF tickée en chart-context. Mêmes règles que `updateOne` (validation 3
+//           bougies parallèles, invalidation sur cassure d'extrême, construction sur le corps,
+//           expiration par période d'intérêt, FIFO) mais opère sur :
+//             - `zones` passé en in/out (instance unique en chart-context chez le caller).
+//             - les primitives HTF reçues d'un seul `request.security(sym, tf, [O,H,L,C,T,signal])`.
+//             - un ring buffer interne (8 dernières barres HTF) pour la construction lookback —
+//               `open[off]` n'est pas accessible depuis le contexte chart pour la série HTF.
+//
+//           Le `var` interne (pending + ring buffer + lastHtfTime) est créé **par call site** :
+//           7 appels `tickMtf` dans l'indicateur → 7 stockages indépendants. Même pattern que
+//           `updateOne` (qui fonctionne via 7 `request.security` distincts), juste relocalisé en
+//           chart-context.
+//
+//           Détection de nouvelle barre HTF via `htfTime != lastHtfTime`. Sur nouvelle barre :
+//           shift ring buffer, expiration interestStart, advance pending (invalidate/decrement/
+//           construct), push new pending si CMI, cleanup FIFO. Sur même barre HTF que la précédente
+//           chart-bar (no-op intra-bar) : rien.
+//
+// @param zones              Array<CmiZone> chart-context, muté in place. Le caller crée
+//                           `var array<cmiZone.CmiZone> mZones = array.new<cmiZone.CmiZone>()`
+//                           et le passe à chaque tick.
+// @param tfMinutes          Timeframe d'origine (M=43200, W=10080, D=1440, H4=240, H1=60, M15=15, M5=5).
+// @param cmiSignal          `signal.detectCMI()` du contexte HTF reçu via request.security.
+// @param htfOpen / htfHigh / htfLow / htfClose / htfTime  Primitives OHLC + time HTF reçues via tuple.
+// @param lookbackBars       1-5.
+// @param interestStartTime  Timestamp ms (0 = illimité).
+// @param maxZones           Cap FIFO interne.
+// @returns array<CmiZone> (`zones`, par commodité de chaînage).
+export tickMtf(array<CmiZone> zones, simple int tfMinutes, signal.SignalKind cmiSignal,
+  float htfOpen, float htfHigh, float htfLow, float htfClose, int htfTime,
+  simple int lookbackBars, int interestStartTime, simple int maxZones) =>
+
+    var array<PendingCMI> pending = array.new<PendingCMI>()
+
+    // Ring buffer (8 = lookbackMax 5 + barsValidation 3) des dernières barres HTF. Index 0 = la
+    // plus récente. Initialisé à na ; les slots non encore alimentés sont skippés à la construction.
+    var array<float> bufO = array.new<float>(8, na)
+    var array<float> bufH = array.new<float>(8, na)
+    var array<float> bufL = array.new<float>(8, na)
+    var array<float> bufC = array.new<float>(8, na)
+    var array<int>   bufT = array.new<int>(8, na)
+
+    var int lastHtfTime = na
+
+    bool isNewHtfBar = na(lastHtfTime) ? not na(htfTime) : htfTime != lastHtfTime
+
+    if isNewHtfBar
+        // --- Shift ring buffer (drop index 7, glisser 1→6, insérer en 0). ---
+        for i = 7 to 1
+            array.set(bufO, i, array.get(bufO, i - 1))
+            array.set(bufH, i, array.get(bufH, i - 1))
+            array.set(bufL, i, array.get(bufL, i - 1))
+            array.set(bufC, i, array.get(bufC, i - 1))
+            array.set(bufT, i, array.get(bufT, i - 1))
+        array.set(bufO, 0, htfOpen)
+        array.set(bufH, 0, htfHigh)
+        array.set(bufL, 0, htfLow)
+        array.set(bufC, 0, htfClose)
+        array.set(bufT, 0, htfTime)
+
+        // --- 1. Expiration par période d'intérêt ---
+        n0 = array.size(zones)
+        if n0 > 0
+            for i = 0 to n0 - 1
+                CmiZone cz = array.get(zones, i)
+                if cz.state != CmiState.EXPIRED and cz.leftTime < interestStartTime
+                    cz.state := CmiState.EXPIRED
+
+        // --- 2+3. Tick validation sur chaque pending (descendant pour retrait sur place). ---
+        if array.size(pending) > 0
+            for i = array.size(pending) - 1 to 0
+                PendingCMI p = array.get(pending, i)
+                bool invalidated = false
+                if p.side == CmiSide.BULL and htfClose < p.low
+                    invalidated := true
+                if p.side == CmiSide.BEAR and htfClose > p.high
+                    invalidated := true
+                if invalidated
+                    array.remove(pending, i)
+                else
+                    p.barsLeft -= 1
+                    if p.barsLeft == 0
+                        CmiZone newCz = constructZoneFromBuffer(p, lookbackBars, tfMinutes, bufO, bufH, bufL, bufC, bufT)
+                        if not na(newCz)
+                            array.push(zones, newCz)
+                        array.remove(pending, i)
+
+        // --- 4. Démarrage d'une nouvelle validation si CMI cette barre HTF. ---
+        bool cmiNow = cmiSignal == signal.SignalKind.CMI_BULL or cmiSignal == signal.SignalKind.CMI_BEAR
+        if cmiNow
+            CmiSide    newSide = cmiSignal == signal.SignalKind.CMI_BULL ? CmiSide.BULL : CmiSide.BEAR
+            // barIndex pas utilisé en chart-context (la lookback passe par le ring buffer).
+            PendingCMI newP    = PendingCMI.new(0, 3, newSide, htfOpen, htfLow, htfHigh)
+            array.push(pending, newP)
+
+        // --- 5. Cleanup ---
+        removeExpiredCmi(zones)
+        trimOldestCmi(zones, maxZones)
+
+        lastHtfTime := htfTime
+
+    zones
+
+// ============================================================
 // Anti-chevauchement intra-TF
 // ============================================================
 
@@ -231,10 +390,12 @@ export intraOverlapPass(array<CmiZone> zones, bool pendingMode) =>
     zones
 
 // @function Downgrade en PENDING toute CmiZone ACTIVE de `lower` qui chevauche geometriquement
-//           une zone non-expiree de `higher` (TF superieur). Cross-TF n'utilise PAS le critere
-//           open-in-zone (contextes de TF differents) — uniquement chevauchement geometrique.
-//           Reactivation auto par le tour suivant d'`intraOverlapPass` quand le bloqueur disparait.
-//           Idempotent.
+//           une zone **ACTIVE** de `higher` (TF superieur). Une zone haute PENDING ne bloque PAS :
+//           si elle-meme n'est pas affichee, elle ne peut pas justifier de cacher une zone basse.
+//           Cross-TF n'utilise PAS le critere open-in-zone (contextes de TF differents) —
+//           uniquement chevauchement geometrique.
+//           Reactivation auto par le tour suivant d'`intraOverlapPass` quand le bloqueur disparait
+//           ou redevient ACTIVE. Idempotent.
 // @param lower   array<CmiZone> du TF inferieur (mute in place).
 // @param higher  array<CmiZone> du TF superieur (lecture seule).
 // @returns array<CmiZone> (`lower`).
@@ -248,7 +409,7 @@ export crossTfOverlapPass(array<CmiZone> lower, array<CmiZone> higher) =>
                 bool blocked = false
                 for j = 0 to nHi - 1
                     CmiZone other = array.get(higher, j)
-                    if other.state != CmiState.EXPIRED and overlap(other, cz)
+                    if other.state == CmiState.ACTIVE and overlap(other, cz)
                         blocked := true
                         break
                 if blocked

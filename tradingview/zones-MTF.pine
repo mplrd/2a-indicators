@@ -1,125 +1,194 @@
 //@version=6
-// @description 2Ai Zones MTF — CMI Zones multi-timeframe (Monthly → M15).
-//              Detection + validation + lookback + anti-chevauchement intra-TF
-//              (Pending|Replacement) + cross-TF (Pending|Autorise) + expiration : toute la
-//              logique vit dans `lib_cmi_zone`. L'indicateur ne fait que declarer les
-//              inputs, appeler `cmiZone.updateAllTfs(...)` et faire le rendu via
-//              `lib_draw.drawZone` avec un filtre TF-chart ≤ TF-zone (Monthly toujours).
-//              Cf. SPECIFICATIONS.md § Indicateur 3.
+// @description 2Ai Zones MTF — CMI Zones multi-timeframe (M / W / D / H4 / H1 / M15 / M5).
+//              Wiring de la state machine `lib_cmi_zone` (validee en single-TF par `zones-CMI`) sur
+//              7 TFs simultanees via 6 `request.security`. Anti-chevauchement intra-TF (Pending /
+//              Replacement) et cross-TF (Pending / Autorise — "pas les petites si dans les grandes").
+//              `lib_cmi_zone` est self-contained → rendu par `box.new` direct (pas `drawZone`).
 //
-// ⚠ Dependance : `lib_cmi_zone` n'est PAS encore publie sur TradingView.
-//   Avant utilisation : publier `tradingview/lib-cmi-zone.pine`, puis decommenter
-//   l'import + l'appel `updateAllTfs` + les appels `renderTf` ci-dessous. Mettre a
-//   jour `docs/LIBS.md` avec la version assignee (cf. workflow de publication).
-indicator("2Ai Zones MTF", shorttitle = "2Ai Zones MTF", overlay = true,
-  max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500)
+//              CE10051 oblige : l'orchestration MTF vit dans l'indicateur (un `request.security`
+//              dans une fonction exportee ne peut pas dependre des args de cette fonction). Les 7
+//              `var array<CmiZone>` vivent donc dans le `var` interne d'`updateOne` cote lib —
+//              une instance par contexte `request.security`.
+indicator("2Ai Zones MTF", shorttitle = "Zones MTF", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 500)
 
 // ============================================================
 // Imports
 // ============================================================
-import mpilard/lib_zone/1   as zone
-// import mpilard/lib_cmi_zone/<TODO> as cmiZone  // TODO : activer apres publication TradingView
-import mpilard/lib_draw/15  as draw
+import mpilard/lib_cmi_zone/6 as cmiZone
+import mpilard/lib_signal/2   as signal
+import mpilard/lib_draw/17    as draw
 
 // ============================================================
-// Inputs
+// Inputs — quadruplet [Enabled][Couleur][Bordure][Epaisseur] par TF (cohérent avec zones-CMI/SD)
 // ============================================================
 
-var globalGroup = "Global"
-var mGroup      = "Monthly"
-var wGroup      = "Weekly"
-var dGroup      = "Daily"
-var h4Group     = "H4"
-var h1Group     = "H1"
-var m15Group    = "M15"
+var mGroup   = "Monthly"
+var wGroup   = "Weekly"
+var dGroup   = "Daily"
+var h4Group  = "H4"
+var h1Group  = "H1"
+var m15Group = "M15"
+var m5Group  = "M5"
 
-// --- Global ---
-intraModeStr = input.string("Pending", "Mode chevauchement intra-TF", options = ["Pending", "Replacement"], group = globalGroup, tooltip = "Pending : nouvelle zone en attente (reactivee quand le chevauchement disparait). Permet le chainage de N pending sur la meme zone de prix.\nReplacement : ancienne(s) zone(s) expiree(s), la nouvelle prend leur place.")
+mEnabled  = input.bool(true,                       "Monthly", inline = "m",   group = mGroup)
+mColor    = input.color(color.olive,               "",        inline = "m",   group = mGroup)
+mBordS    = input.enum(draw.LineStyle.SOLID,       "",        inline = "m",   group = mGroup)
+mBordW    = input.int(1,                           "",        inline = "m",   group = mGroup, minval = 0, maxval = 4)
+
+wEnabled  = input.bool(true,                       "Weekly",  inline = "w",   group = wGroup)
+wColor    = input.color(color.teal,                "",        inline = "w",   group = wGroup)
+wBordS    = input.enum(draw.LineStyle.SOLID,       "",        inline = "w",   group = wGroup)
+wBordW    = input.int(1,                           "",        inline = "w",   group = wGroup, minval = 0, maxval = 4)
+
+dEnabled  = input.bool(true,                       "Daily",   inline = "d",   group = dGroup)
+dColor    = input.color(color.blue,                "",        inline = "d",   group = dGroup)
+dBordS    = input.enum(draw.LineStyle.SOLID,       "",        inline = "d",   group = dGroup)
+dBordW    = input.int(1,                           "",        inline = "d",   group = dGroup, minval = 0, maxval = 4)
+
+h4Enabled = input.bool(true,                       "H4",      inline = "h4",  group = h4Group)
+h4Color   = input.color(color.rgb(91, 156, 246),   "",        inline = "h4",  group = h4Group)
+h4BordS   = input.enum(draw.LineStyle.DASHED,      "",        inline = "h4",  group = h4Group)
+h4BordW   = input.int(1,                           "",        inline = "h4",  group = h4Group, minval = 0, maxval = 4)
+
+h1Enabled = input.bool(false,                      "H1",      inline = "h1",  group = h1Group)
+h1Color   = input.color(color.rgb(244, 143, 177),  "",        inline = "h1",  group = h1Group)
+h1BordS   = input.enum(draw.LineStyle.DOTTED,      "",        inline = "h1",  group = h1Group)
+h1BordW   = input.int(1,                           "",        inline = "h1",  group = h1Group, minval = 0, maxval = 4)
+
+m15Enabled = input.bool(false,                     "M15",     inline = "m15", group = m15Group)
+m15Color   = input.color(color.rgb(252, 185, 200), "",        inline = "m15", group = m15Group)
+m15BordS   = input.enum(draw.LineStyle.DOTTED,     "",        inline = "m15", group = m15Group)
+m15BordW   = input.int(0,                          "",        inline = "m15", group = m15Group, minval = 0, maxval = 4)
+
+m5Enabled  = input.bool(false,                     "M5",      inline = "m5",  group = m5Group)
+m5Color    = input.color(color.rgb(255, 220, 230), "",        inline = "m5",  group = m5Group)
+m5BordS    = input.enum(draw.LineStyle.DOTTED,     "",        inline = "m5",  group = m5Group)
+m5BordW    = input.int(0,                          "",        inline = "m5",  group = m5Group, minval = 0, maxval = 4)
+
+// === Paramètres globaux === (déclaré en dernier → affiché tout en bas de la modal TV)
+var globalsGroup = "Paramètres globaux"
+chartTz       = input.string("Europe/Paris", "Chart timezone", group = globalsGroup, tooltip = "TZ IANA du chart. Pine ne l'expose pas, il faut la fournir pour aligner les bornes 'aujourd'hui / cette semaine / ce mois' sur l'affichage.")
+lookbackBars  = input.int(3, "Drawing CMI Zone Lookback", group = globalsGroup, minval = 1, maxval = 5)
+intraModeStr  = input.string("Pending", "Mode chevauchement intra-TF", options = ["Pending", "Replacement"], group = globalsGroup, tooltip = "Pending : zone en attente si chevauchement (réactivée quand le bloqueur expire, chaînage FIFO). Replacement : l'ancienne expire, la nouvelle prend sa place.")
 intraPendingMode = intraModeStr == "Pending"
-
-crossModeStr = input.string("Pending", "Mode chevauchement cross-TF", options = ["Pending", "Autorise"], group = globalGroup, tooltip = "Pending : une zone qui chevauche une zone d'un TF superieur est mise en attente (priorite Monthly > Weekly > Daily > H4 > H1 > M15).\nAutorise : pas de regle cross-TF, les zones de differents TF peuvent se superposer.")
+crossModeStr  = input.string("Pending", "Mode chevauchement cross-TF", options = ["Pending", "Autorise"], group = globalsGroup, tooltip = "Pending : zone d'une petite UT cachée si elle chevauche une zone d'une plus grande UT (priorité M > W > D > H4 > H1 > M15 > M5). Autorise : superpositions libres.")
 crossTfPending = crossModeStr == "Pending"
-
-chartTz      = input.string("Europe/Paris", "Chart timezone", group = globalGroup, tooltip = "TZ IANA du chart. Pine ne l'expose pas, il faut la fournir pour aligner les bornes 'aujourd'hui / cette semaine / ce mois' sur l'affichage.")
-lookbackBars = input.int(3, "Drawing CMI Zone Lookback", minval = 1, maxval = 5, group = globalGroup)
-
-// --- Per TF ---
-mOn      = input.bool(true,                       "Monthly",   inline = "m_h",   group = mGroup)
-mColor   = input.color(color.olive,               "",          inline = "m_h",   group = mGroup)
-mBordS   = input.enum(draw.LineStyle.SOLID,       "Bordure",   inline = "m_b",   group = mGroup)
-mBordW   = input.int(1,                           "Epaisseur", inline = "m_b",   group = mGroup, minval = 0, maxval = 4)
-
-wOn      = input.bool(true,                       "Weekly",    inline = "w_h",   group = wGroup)
-wColor   = input.color(color.teal,                "",          inline = "w_h",   group = wGroup)
-wBordS   = input.enum(draw.LineStyle.SOLID,       "Bordure",   inline = "w_b",   group = wGroup)
-wBordW   = input.int(1,                           "Epaisseur", inline = "w_b",   group = wGroup, minval = 0, maxval = 4)
-
-dOn      = input.bool(true,                       "Daily",     inline = "d_h",   group = dGroup)
-dColor   = input.color(color.blue,                "",          inline = "d_h",   group = dGroup)
-dBordS   = input.enum(draw.LineStyle.SOLID,       "Bordure",   inline = "d_b",   group = dGroup)
-dBordW   = input.int(1,                           "Epaisseur", inline = "d_b",   group = dGroup, minval = 0, maxval = 4)
-
-h4On     = input.bool(true,                       "H4",        inline = "h4_h",  group = h4Group)
-h4Color  = input.color(color.rgb(91, 156, 246),   "",          inline = "h4_h",  group = h4Group)
-h4BordS  = input.enum(draw.LineStyle.DASHED,      "Bordure",   inline = "h4_b",  group = h4Group)
-h4BordW  = input.int(1,                           "Epaisseur", inline = "h4_b",  group = h4Group, minval = 0, maxval = 4)
-
-h1On     = input.bool(false,                      "H1",        inline = "h1_h",  group = h1Group)
-h1Color  = input.color(color.rgb(244, 143, 177),  "",          inline = "h1_h",  group = h1Group)
-h1BordS  = input.enum(draw.LineStyle.DOTTED,      "Bordure",   inline = "h1_b",  group = h1Group)
-h1BordW  = input.int(1,                           "Epaisseur", inline = "h1_b",  group = h1Group, minval = 0, maxval = 4)
-
-m15On    = input.bool(false,                      "M15",       inline = "m15_h", group = m15Group)
-m15Color = input.color(color.rgb(252, 185, 200),  "",          inline = "m15_h", group = m15Group)
-m15BordS = input.enum(draw.LineStyle.DOTTED,      "Bordure",   inline = "m15_b", group = m15Group)
-m15BordW = input.int(0,                           "Epaisseur", inline = "m15_b", group = m15Group, minval = 0, maxval = 4)
+maxZones      = input.int(100, "Max zones par TF (FIFO)", group = globalsGroup, minval = 1, maxval = 500)
 
 // ============================================================
-// Orchestration MTF
+// Orchestration MTF — 7 request.security (un par TF) + state machine chart-context
 // ============================================================
-// Tout le travail est dans la lib : detection / validation / construction / anti-chevauchement
-// (intra + cross) / expiration par periode d'interet / calcul des bornes en chartTz.
-// L'indicateur recoit juste les 6 arrays prets pour le rendu.
+// Architecture v2 (post memory blow-up) : `request.security` ne retourne plus `array<CmiZone>`
+// (snapshot par chart-bar = explosion mémoire), mais un TUPLE de primitives (OHLC + time + signal).
+// La state machine vit en chart-context via `cmiZone.tickMtf(...)`, avec un `var array<CmiZone>`
+// par TF côté indicateur — une instance unique, mutée in place, zéro snapshot.
+//
+// Bornes d'intérêt calculées **dans le contexte chart** (et non plus dans HTF) : les bornes
+// "aujourd'hui / cette semaine / ce mois" sont alignées sur le chart, plus précis pour M5/M15.
 
-MAX_ZONES_PER_TF = 100
+mStart   = cmiZone.interestStartForTf(43200, chartTz)
+wStart   = cmiZone.interestStartForTf(10080, chartTz)
+dStart   = cmiZone.interestStartForTf(1440,  chartTz)
+h4Start  = cmiZone.interestStartForTf(240,   chartTz)
+h1Start  = cmiZone.interestStartForTf(60,    chartTz)
+m15Start = cmiZone.interestStartForTf(15,    chartTz)
+m5Start  = cmiZone.interestStartForTf(5,     chartTz)
 
-// TODO (apres publication lib_cmi_zone) : decommenter le bloc suivant.
-// [mZones, wZones, dZones, h4Zones, h1Zones, m15Zones] = cmiZone.updateAllTfs(
-//   syminfo.tickerid, lookbackBars, intraPendingMode, crossTfPending, chartTz, MAX_ZONES_PER_TF)
+// 7 request.security retournant chacun un tuple [open, high, low, close, time, signal HTF].
+// Pattern anti-repaint canonique : `[1] + lookahead_on`. Sans `[1]`, à la transition d'une barre
+// HTF, on capture l'OHLC just-started de la barre suivante (open≈high≈low≈close = previous close)
+// au lieu de l'OHLC final de la barre qui vient de clôturer → ring buffer dégénéré, zones
+// construites à des positions absurdes. Avec `[1]` + `lookahead_on`, on reçoit toujours l'OHLC
+// final de la dernière barre HTF CLÔTURÉE, stable, sans look-ahead du futur.
+[mO,  mH,  mL,  mC,  mT,  mSig]  = request.security(syminfo.tickerid, "M",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[wO,  wH,  wL,  wC,  wT,  wSig]  = request.security(syminfo.tickerid, "W",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[dO,  dH,  dL,  dC,  dT,  dSig]  = request.security(syminfo.tickerid, "D",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[h4O, h4H, h4L, h4C, h4T, h4Sig] = request.security(syminfo.tickerid, "240", [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[h1O, h1H, h1L, h1C, h1T, h1Sig] = request.security(syminfo.tickerid, "60",  [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[m15O,m15H,m15L,m15C,m15T,m15Sig]= request.security(syminfo.tickerid, "15",  [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+[m5O, m5H, m5L, m5C, m5T, m5Sig] = request.security(syminfo.tickerid, "5",   [open[1], high[1], low[1], close[1], time[1], signal.detectCMI()[1]], lookahead = barmerge.lookahead_on)
+
+// 7 collections persistantes en chart-context (1 instance par TF, mutée in place — pas de snapshot).
+var array<cmiZone.CmiZone> mZones   = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> wZones   = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> dZones   = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> h4Zones  = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> h1Zones  = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> m15Zones = array.new<cmiZone.CmiZone>()
+var array<cmiZone.CmiZone> m5Zones  = array.new<cmiZone.CmiZone>()
+
+// Tick chaque state machine. `tickMtf` détecte en interne les nouvelles barres HTF via change de
+// `htfTime` et avance le state. Ring buffer interne pour la construction lookback (l'historique
+// HTF n'est pas accessible depuis le chart-context, d'où le buffer).
+cmiZone.tickMtf(mZones,   43200, mSig,  mO,  mH,  mL,  mC,  mT,  lookbackBars, mStart,   maxZones)
+cmiZone.tickMtf(wZones,   10080, wSig,  wO,  wH,  wL,  wC,  wT,  lookbackBars, wStart,   maxZones)
+cmiZone.tickMtf(dZones,   1440,  dSig,  dO,  dH,  dL,  dC,  dT,  lookbackBars, dStart,   maxZones)
+cmiZone.tickMtf(h4Zones,  240,   h4Sig, h4O, h4H, h4L, h4C, h4T, lookbackBars, h4Start,  maxZones)
+cmiZone.tickMtf(h1Zones,  60,    h1Sig, h1O, h1H, h1L, h1C, h1T, lookbackBars, h1Start,  maxZones)
+cmiZone.tickMtf(m15Zones, 15,    m15Sig,m15O,m15H,m15L,m15C,m15T,lookbackBars, m15Start, maxZones)
+cmiZone.tickMtf(m5Zones,  5,     m5Sig, m5O, m5H, m5L, m5C, m5T, lookbackBars, m5Start,  maxZones)
+
+// Anti-chevauchement intra-TF (idempotent — recalculé à chaque chart-bar). La passe mute en place
+// le state ACTIVE/PENDING ; la lib ne retire jamais une zone non-EXPIRED, donc l'état est stable.
+cmiZone.intraOverlapPass(mZones,   intraPendingMode)
+cmiZone.intraOverlapPass(wZones,   intraPendingMode)
+cmiZone.intraOverlapPass(dZones,   intraPendingMode)
+cmiZone.intraOverlapPass(h4Zones,  intraPendingMode)
+cmiZone.intraOverlapPass(h1Zones,  intraPendingMode)
+cmiZone.intraOverlapPass(m15Zones, intraPendingMode)
+cmiZone.intraOverlapPass(m5Zones,  intraPendingMode)
+
+// Cross-TF descendant : pour chaque TF, downgrade ACTIVE → PENDING si chevauchement avec une zone
+// non-EXPIRED d'un TF supérieur. 21 paires au total (n(n-1)/2 avec n=7). Réactivation auto au
+// prochain tick si le bloqueur HTF disparaît (idempotent + intraOverlapPass remet à ACTIVE).
+if crossTfPending
+    cmiZone.crossTfOverlapPass(wZones,   mZones)
+    cmiZone.crossTfOverlapPass(dZones,   mZones)
+    cmiZone.crossTfOverlapPass(dZones,   wZones)
+    cmiZone.crossTfOverlapPass(h4Zones,  mZones)
+    cmiZone.crossTfOverlapPass(h4Zones,  wZones)
+    cmiZone.crossTfOverlapPass(h4Zones,  dZones)
+    cmiZone.crossTfOverlapPass(h1Zones,  mZones)
+    cmiZone.crossTfOverlapPass(h1Zones,  wZones)
+    cmiZone.crossTfOverlapPass(h1Zones,  dZones)
+    cmiZone.crossTfOverlapPass(h1Zones,  h4Zones)
+    cmiZone.crossTfOverlapPass(m15Zones, mZones)
+    cmiZone.crossTfOverlapPass(m15Zones, wZones)
+    cmiZone.crossTfOverlapPass(m15Zones, dZones)
+    cmiZone.crossTfOverlapPass(m15Zones, h4Zones)
+    cmiZone.crossTfOverlapPass(m15Zones, h1Zones)
+    cmiZone.crossTfOverlapPass(m5Zones,  mZones)
+    cmiZone.crossTfOverlapPass(m5Zones,  wZones)
+    cmiZone.crossTfOverlapPass(m5Zones,  dZones)
+    cmiZone.crossTfOverlapPass(m5Zones,  h4Zones)
+    cmiZone.crossTfOverlapPass(m5Zones,  h1Zones)
+    cmiZone.crossTfOverlapPass(m5Zones,  m15Zones)
 
 // ============================================================
-// Rendu
+// Rendu — orchestration pure : 7 boucles inline qui délèguent à `draw.drawZoneBox` (lib_draw,
+// primitive agnostique du type). On déballe les champs de CmiZone au call site et on passe le
+// bool d'activité. Aucun `box.new` ni helper local.
+// Filtre TF-chart ≤ TF-zone : intégré dans le param `show` (Monthly = toujours visible par spec).
 // ============================================================
-// Filtre d'affichage : zone TF X visible seulement si chart TF ≤ X (Monthly toujours visible,
-// quelle que soit la chart TF). Seules les zones ACTIVE sont rendues (PENDING masquees).
-
-MONTHLY_MINUTES = 43200
-
 var array<box>   boxArr   = array.new<box>()
-var array<label> labelArr = array.new<label>()
-
-// Signature une ligne (cf. memory pine_typing) ; `simple` preserve pour les params que
-// `draw.drawZone` consomme en `simple`.
-renderTf(array<zone.Zone> zones, bool on, color col, simple draw.LineStyle bStyle, simple int bWidth) =>
-    if on
-        chartMin = math.round(timeframe.in_seconds() / 60)
-        for z in zones
-            if zone.isActive(z) and (z.tfMinutes >= MONTHLY_MINUTES or chartMin <= z.tfMinutes)
-                draw.drawZone(true, z, col, bWidth, bStyle, 85, 40, false, "", boxArr, labelArr)
+var array<label> labelArr = array.new<label>()  // requis par drawZoneBox (jamais peuplé, showLbl=false)
 
 if barstate.islast
-    // Nettoyage des objets precedents.
-    for bx in boxArr
-        box.delete(bx)
-    array.clear(boxArr)
-    for lb in labelArr
-        label.delete(lb)
-    array.clear(labelArr)
+    draw.clearBoxes(boxArr)
 
-    // TODO (apres publication lib_cmi_zone) : decommenter ces 6 appels.
-    // renderTf(mZones,   mOn,   mColor,   mBordS,   mBordW)
-    // renderTf(wZones,   wOn,   wColor,   wBordS,   wBordW)
-    // renderTf(dZones,   dOn,   dColor,   dBordS,   dBordW)
-    // renderTf(h4Zones,  h4On,  h4Color,  h4BordS,  h4BordW)
-    // renderTf(h1Zones,  h1On,  h1Color,  h1BordS,  h1BordW)
-    // renderTf(m15Zones, m15On, m15Color, m15BordS, m15BordW)
+    chartMin = math.round(timeframe.in_seconds() / 60)
+
+    for cz in mZones
+        draw.drawZoneBox(mEnabled,                                cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, mColor,   mBordW,   mBordS,   85, 40, false, "", boxArr, labelArr)
+    for cz in wZones
+        draw.drawZoneBox(wEnabled   and chartMin <= cz.tfMinutes, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, wColor,   wBordW,   wBordS,   85, 40, false, "", boxArr, labelArr)
+    for cz in dZones
+        draw.drawZoneBox(dEnabled   and chartMin <= cz.tfMinutes, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, dColor,   dBordW,   dBordS,   85, 40, false, "", boxArr, labelArr)
+    for cz in h4Zones
+        draw.drawZoneBox(h4Enabled  and chartMin <= cz.tfMinutes, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, h4Color,  h4BordW,  h4BordS,  85, 40, false, "", boxArr, labelArr)
+    for cz in h1Zones
+        draw.drawZoneBox(h1Enabled  and chartMin <= cz.tfMinutes, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, h1Color,  h1BordW,  h1BordS,  85, 40, false, "", boxArr, labelArr)
+    for cz in m15Zones
+        draw.drawZoneBox(m15Enabled and chartMin <= cz.tfMinutes, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, m15Color, m15BordW, m15BordS, 85, 40, false, "", boxArr, labelArr)
+    for cz in m5Zones
+        draw.drawZoneBox(m5Enabled  and chartMin <= cz.tfMinutes, cz.state == cmiZone.CmiState.ACTIVE, cz.leftTime, cz.top, cz.bottom, m5Color,  m5BordW,  m5BordS,  85, 40, false, "", boxArr, labelArr)
