@@ -43,6 +43,30 @@ namespace _2Ai.Indicators.Layout
         [Parameter("BBm mode", DefaultValue = "simple", Group = "Bollinger Magique")]
         public string BbmMode { get; set; }  // "ribbon" | "simple"
 
+        [Parameter("MA7 activée",   DefaultValue = true,     Group = "MA7")]
+        public bool Ma7Enabled { get; set; }
+
+        [Parameter("MA7 mode",      DefaultValue = "simple", Group = "MA7")]
+        public string Ma7Mode { get; set; }
+
+        [Parameter("MA20 activée",  DefaultValue = true,     Group = "MA20")]
+        public bool Ma20Enabled { get; set; }
+
+        [Parameter("MA20 mode",     DefaultValue = "simple", Group = "MA20")]
+        public string Ma20Mode { get; set; }
+
+        [Parameter("MA50 activée",  DefaultValue = true,     Group = "MA50")]
+        public bool Ma50Enabled { get; set; }
+
+        [Parameter("MA50 mode",     DefaultValue = "simple", Group = "MA50")]
+        public string Ma50Mode { get; set; }
+
+        [Parameter("MA200 activée", DefaultValue = true,     Group = "MA200")]
+        public bool Ma200Enabled { get; set; }
+
+        [Parameter("MA200 mode",    DefaultValue = "simple", Group = "MA200")]
+        public string Ma200Mode { get; set; }
+
         [Parameter("Bandes plates activées", DefaultValue = true, Group = "Bandes Plates")]
         public bool FlatEnabled { get; set; }
 
@@ -100,6 +124,46 @@ namespace _2Ai.Indicators.Layout
         public IndicatorDataSeries BbmAccentLower { get; set; }
 
         // ============================================================
+        // Outputs — Moyennes Mobiles (basis + upper/lower invisible pour ref fill ribbon)
+        // ============================================================
+
+        [Output("MA7 Basis", LineColor = "Aqua",   PlotType = PlotType.Line, Thickness = 1, LineStyle = LineStyle.Lines)]
+        public IndicatorDataSeries Ma7Basis { get; set; }
+
+        [Output("MA7 Upper", LineColor = "Aqua",   PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma7Upper { get; set; }
+
+        [Output("MA7 Lower", LineColor = "Aqua",   PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma7Lower { get; set; }
+
+        [Output("MA20 Basis", LineColor = "Blue",  PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma20Basis { get; set; }
+
+        [Output("MA20 Upper", LineColor = "Blue",  PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma20Upper { get; set; }
+
+        [Output("MA20 Lower", LineColor = "Blue",  PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma20Lower { get; set; }
+
+        [Output("MA50 Basis", LineColor = "Orange", PlotType = PlotType.Line, Thickness = 2)]
+        public IndicatorDataSeries Ma50Basis { get; set; }
+
+        [Output("MA50 Upper", LineColor = "Orange", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma50Upper { get; set; }
+
+        [Output("MA50 Lower", LineColor = "Orange", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma50Lower { get; set; }
+
+        [Output("MA200 Basis", LineColor = "Gray", PlotType = PlotType.Line, Thickness = 2, LineStyle = LineStyle.Lines)]
+        public IndicatorDataSeries Ma200Basis { get; set; }
+
+        [Output("MA200 Upper", LineColor = "Gray", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma200Upper { get; set; }
+
+        [Output("MA200 Lower", LineColor = "Gray", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries Ma200Lower { get; set; }
+
+        // ============================================================
         // Lifecycle
         // ============================================================
 
@@ -122,6 +186,35 @@ namespace _2Ai.Indicators.Layout
                 BbmLength, BbmMultInner, BbmMultOuter,
                 BbmOuterUpper, BbmOuterLower, BbmInnerUpper, BbmInnerLower,
                 BbmAccentUpper, BbmAccentLower);
+
+            CalculateMa(index, Ma7Enabled,   Ma7Mode   == "ribbon", 7,   Ma7Basis,   Ma7Upper,   Ma7Lower);
+            CalculateMa(index, Ma20Enabled,  Ma20Mode  == "ribbon", 20,  Ma20Basis,  Ma20Upper,  Ma20Lower);
+            CalculateMa(index, Ma50Enabled,  Ma50Mode  == "ribbon", 50,  Ma50Basis,  Ma50Upper,  Ma50Lower);
+            CalculateMa(index, Ma200Enabled, Ma200Mode == "ribbon", 200, Ma200Basis, Ma200Upper, Ma200Lower);
+        }
+
+        /// <summary>
+        /// Calcule un block MA Ribbon (basis + upper + lower) pour un index donné.
+        /// Basis toujours visible si enabled ; upper/lower visibles uniquement en mode ribbon
+        /// (NaN trick, comme pour les inner Bollinger). stdFactor = 0.236 (default projet,
+        /// hardcodé pour parité Pine).
+        /// </summary>
+        private void CalculateMa(int index, bool enabled, bool isRibbon, int length,
+            IndicatorDataSeries basisOut, IndicatorDataSeries upperOut, IndicatorDataSeries lowerOut)
+        {
+            if (!enabled || index < length - 1)
+            {
+                basisOut[index] = double.NaN;
+                upperOut[index] = double.NaN;
+                lowerOut[index] = double.NaN;
+                return;
+            }
+
+            var (basis, upper, lower) = MovingAverages.Ribbon(Bars.ClosePrices, index, length);
+
+            basisOut[index] = basis;
+            upperOut[index] = isRibbon ? upper : double.NaN;
+            lowerOut[index] = isRibbon ? lower : double.NaN;
         }
 
         /// <summary>
