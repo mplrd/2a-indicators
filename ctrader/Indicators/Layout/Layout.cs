@@ -23,6 +23,10 @@ namespace _2Ai.Indicators.Layout
         private const double BbcMultInner = 2.0;
         private const double BbcMultOuter = 2.5;
 
+        private const int    BbmLength    = 160;
+        private const double BbmMultInner = 2.5;
+        private const double BbmMultOuter = 2.8;
+
         // ============================================================
         // Parameters
         // ============================================================
@@ -32,6 +36,12 @@ namespace _2Ai.Indicators.Layout
 
         [Parameter("BBc mode", DefaultValue = "ribbon", Group = "Bollinger Classique")]
         public string BbcMode { get; set; }  // "ribbon" | "simple"
+
+        [Parameter("BBm activé", DefaultValue = true, Group = "Bollinger Magique")]
+        public bool BbmEnabled { get; set; }
+
+        [Parameter("BBm mode", DefaultValue = "simple", Group = "Bollinger Magique")]
+        public string BbmMode { get; set; }  // "ribbon" | "simple"
 
         [Parameter("Bandes plates activées", DefaultValue = true, Group = "Bandes Plates")]
         public bool FlatEnabled { get; set; }
@@ -68,6 +78,28 @@ namespace _2Ai.Indicators.Layout
         public IndicatorDataSeries BbcAccentLower { get; set; }
 
         // ============================================================
+        // Outputs — Bollinger Magique (longueur 160, multipls 2.5/2.8, plus épais que BBc)
+        // ============================================================
+
+        [Output("BBm Outer Upper", LineColor = "#808080", PlotType = PlotType.Line, Thickness = 2)]
+        public IndicatorDataSeries BbmOuterUpper { get; set; }
+
+        [Output("BBm Outer Lower", LineColor = "#808080", PlotType = PlotType.Line, Thickness = 2)]
+        public IndicatorDataSeries BbmOuterLower { get; set; }
+
+        [Output("BBm Inner Upper", LineColor = "#808080", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries BbmInnerUpper { get; set; }
+
+        [Output("BBm Inner Lower", LineColor = "#808080", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries BbmInnerLower { get; set; }
+
+        [Output("BBm Accent Upper", LineColor = "Red",   PlotType = PlotType.Line, Thickness = 3)]
+        public IndicatorDataSeries BbmAccentUpper { get; set; }
+
+        [Output("BBm Accent Lower", LineColor = "Green", PlotType = PlotType.Line, Thickness = 3)]
+        public IndicatorDataSeries BbmAccentLower { get; set; }
+
+        // ============================================================
         // Lifecycle
         // ============================================================
 
@@ -79,32 +111,62 @@ namespace _2Ai.Indicators.Layout
 
         public override void Calculate(int index)
         {
-            if (!BbcEnabled) return;
-            if (index < BbcLength - 1) return;
+            CalculateBb(
+                index, BbcEnabled, BbcMode == "ribbon",
+                BbcLength, BbcMultInner, BbcMultOuter,
+                BbcOuterUpper, BbcOuterLower, BbcInnerUpper, BbcInnerLower,
+                BbcAccentUpper, BbcAccentLower);
 
-            // Compute Bollinger bands via Core lib.
-            var (_, iU, iL, oU, oL) = Bollinger.Bands(Bars.ClosePrices, index, BbcLength, BbcMultInner, BbcMultOuter);
+            CalculateBb(
+                index, BbmEnabled, BbmMode == "ribbon",
+                BbmLength, BbmMultInner, BbmMultOuter,
+                BbmOuterUpper, BbmOuterLower, BbmInnerUpper, BbmInnerLower,
+                BbmAccentUpper, BbmAccentLower);
+        }
 
-            BbcOuterUpper[index] = oU;
-            BbcOuterLower[index] = oL;
+        /// <summary>
+        /// Calcule un block Bollinger (outer + inner + accent) pour un index donné.
+        /// Extrait pour éviter la duplication BBc / BBm (et futurs BB si extension projet).
+        /// Note : pas extrait en Core lib parce que la signature manipule des
+        /// <c>IndicatorDataSeries</c> de l'indicateur — ce serait coupler Core à un
+        /// indicateur précis. Helper privé local, factorise dans le scope Layout.
+        /// </summary>
+        private void CalculateBb(
+            int index, bool enabled, bool isRibbon,
+            int length, double multInner, double multOuter,
+            IndicatorDataSeries outerUpper, IndicatorDataSeries outerLower,
+            IndicatorDataSeries innerUpper, IndicatorDataSeries innerLower,
+            IndicatorDataSeries accentUpper, IndicatorDataSeries accentLower)
+        {
+            if (!enabled || index < length - 1)
+            {
+                outerUpper[index]  = double.NaN;
+                outerLower[index]  = double.NaN;
+                innerUpper[index]  = double.NaN;
+                innerLower[index]  = double.NaN;
+                accentUpper[index] = double.NaN;
+                accentLower[index] = double.NaN;
+                return;
+            }
+
+            var (_, iU, iL, oU, oL) = Bollinger.Bands(Bars.ClosePrices, index, length, multInner, multOuter);
+
+            outerUpper[index] = oU;
+            outerLower[index] = oL;
 
             // Inner bands : visibles en mode ribbon uniquement.
-            bool isRibbon = BbcMode == "ribbon";
-            BbcInnerUpper[index] = isRibbon ? iU : double.NaN;
-            BbcInnerLower[index] = isRibbon ? iL : double.NaN;
+            innerUpper[index] = isRibbon ? iU : double.NaN;
+            innerLower[index] = isRibbon ? iL : double.NaN;
 
             // Détection flat / closing sur les bandes outer.
-            // Hoist explicite hors du `||` (cohérent avec le pattern Pine isClosingSeries) :
-            // C# court-circuite `||`, mais nos helpers sont stateless (pas de risque de
-            // désynchro historique), donc OK ici. On garde le hoist pour lisibilité.
-            bool upperFlat    = FlatEnabled && Series.IsFlatSeries(BbcOuterUpper,    index, FlatPeriod, FlatThreshold);
-            bool upperClosing = FlatEnabled && Series.IsClosingSeries(BbcOuterUpper, index, FlatPeriod, FlatThreshold, true);
-            bool lowerFlat    = FlatEnabled && Series.IsFlatSeries(BbcOuterLower,    index, FlatPeriod, FlatThreshold);
-            bool lowerClosing = FlatEnabled && Series.IsClosingSeries(BbcOuterLower, index, FlatPeriod, FlatThreshold, false);
+            bool upperFlat    = FlatEnabled && Series.IsFlatSeries(outerUpper,    index, FlatPeriod, FlatThreshold);
+            bool upperClosing = FlatEnabled && Series.IsClosingSeries(outerUpper, index, FlatPeriod, FlatThreshold, true);
+            bool lowerFlat    = FlatEnabled && Series.IsFlatSeries(outerLower,    index, FlatPeriod, FlatThreshold);
+            bool lowerClosing = FlatEnabled && Series.IsClosingSeries(outerLower, index, FlatPeriod, FlatThreshold, false);
 
             // Accent : visible en mode non-ribbon quand la bande est plate ou en fermeture.
-            BbcAccentUpper[index] = (!isRibbon && (upperFlat || upperClosing)) ? oU : double.NaN;
-            BbcAccentLower[index] = (!isRibbon && (lowerFlat || lowerClosing)) ? oL : double.NaN;
+            accentUpper[index] = (!isRibbon && (upperFlat || upperClosing)) ? oU : double.NaN;
+            accentLower[index] = (!isRibbon && (lowerFlat || lowerClosing)) ? oL : double.NaN;
         }
     }
 }
