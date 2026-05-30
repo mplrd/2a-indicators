@@ -32,6 +32,9 @@ namespace _2Ai.Indicators.Layout
         private const int IchiKijunLen  = 26;
         private const int IchiSenkouLen = 52;
 
+        private const int    StAtrPeriod = 10;
+        private const double StFactor    = 3.0;
+
         // ============================================================
         // Parameters
         // ============================================================
@@ -78,6 +81,9 @@ namespace _2Ai.Indicators.Layout
         // Si activé, masque Tenkan/Kijun/Senkou A&B/Kumo et n'affiche que le Chikou Span.
         [Parameter("Chikou uniquement", DefaultValue = true, Group = "Ichimoku")]
         public bool IchiChikouOnly { get; set; }
+
+        [Parameter("Supertrend activé", DefaultValue = false, Group = "Supertrend")]
+        public bool StEnabled { get; set; }
 
         [Parameter("Bandes plates activées", DefaultValue = true, Group = "Bandes Plates")]
         public bool FlatEnabled { get; set; }
@@ -200,13 +206,35 @@ namespace _2Ai.Indicators.Layout
         public IndicatorDataSeries IchiChikou { get; set; }
 
         // ============================================================
+        // Outputs — Supertrend (broken line via DiscontinuousLine, color dynamique via 2 outputs)
+        // ============================================================
+        // cAlgo n'autorise pas de lier dynamiquement la couleur d'un [Output] à la direction
+        // d'un calcul. Solution équivalente Pine : 2 outputs en DiscontinuousLine, le NaN trick
+        // sélectionne lequel s'affiche selon la direction. Le NaN à la bougie de bascule (cf.
+        // pattern Pine stLineBroken) coupe les deux lignes simultanément, créant l'effet break.
+
+        [Output("Supertrend Bull", LineColor = "Green", PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
+        public IndicatorDataSeries StBull { get; set; }
+
+        [Output("Supertrend Bear", LineColor = "Red",   PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
+        public IndicatorDataSeries StBear { get; set; }
+
+        // ============================================================
+        // État interne (Supertrend mémoire)
+        // ============================================================
+        private cAlgo.API.Indicators.AverageTrueRange _atr;
+        private IndicatorDataSeries _stLineMem;
+        private IndicatorDataSeries _stDirMem;
+
+        // ============================================================
         // Lifecycle
         // ============================================================
 
         protected override void Initialize()
         {
-            // Pas d'état persistant à initialiser pour BBc seul.
-            // Les Supertrend / IndicatorDataSeries mémoire seront créés ici aux étapes suivantes.
+            _atr       = Indicators.AverageTrueRange(StAtrPeriod, MovingAverageType.Wilder);
+            _stLineMem = CreateDataSeries();
+            _stDirMem  = CreateDataSeries();
         }
 
         public override void Calculate(int index)
@@ -229,6 +257,47 @@ namespace _2Ai.Indicators.Layout
             CalculateMa(index, Ma200Enabled, Ma200Mode == "ribbon", 200, Ma200Basis, Ma200Upper, Ma200Lower);
 
             CalculateIchimoku(index);
+            CalculateSupertrend(index);
+        }
+
+        /// <summary>
+        /// Calcule le block Supertrend pour un index donné. Délègue à <see cref="Supertrend.Calculate"/>
+        /// de Core (qui maintient state via les 2 IndicatorDataSeries mémoire). Dispatche le résultat
+        /// sur 2 outputs Bull/Bear selon la direction (couleurs figées en attribute). Bougie de bascule
+        /// (changement de direction) → NaN sur les 2 outputs pour effet "broken line" (pattern Pine
+        /// stLineBroken).
+        /// </summary>
+        private void CalculateSupertrend(int index)
+        {
+            if (!StEnabled || index < StAtrPeriod)
+            {
+                StBull[index] = double.NaN;
+                StBear[index] = double.NaN;
+                return;
+            }
+
+            var (line, dir) = _2Ai.Indicators.Core.Supertrend.Calculate(
+                Bars.HighPrices, Bars.LowPrices, Bars.ClosePrices, _atr.Result,
+                index, StFactor, _stLineMem, _stDirMem);
+
+            int prevDir = index > 0 ? (int)_stDirMem[index - 1] : 0;
+            bool dirChanged = prevDir != 0 && prevDir != dir;
+
+            if (dirChanged)
+            {
+                StBull[index] = double.NaN;
+                StBear[index] = double.NaN;
+            }
+            else if (dir == 1)
+            {
+                StBull[index] = line;
+                StBear[index] = double.NaN;
+            }
+            else
+            {
+                StBull[index] = double.NaN;
+                StBear[index] = line;
+            }
         }
 
         /// <summary>
