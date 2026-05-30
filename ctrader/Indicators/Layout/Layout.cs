@@ -1,0 +1,110 @@
+using cAlgo.API;
+using _2Ai.Indicators.Core;
+
+namespace _2Ai.Indicators.Layout
+{
+    /// <summary>
+    /// 2Ai Layout — portage de <c>tradingview/layout.pine</c> vers cAlgo.
+    /// <para>Étape 1 — squelette : Bollinger Classique uniquement (outer + inner + accent
+    /// + détection flat/closing). À enrichir incrémentalement : BBm, MA × 4, Ichimoku,
+    /// Supertrend, projections.</para>
+    /// <para>Limite cAlgo connue : la couleur d'un <c>[Output]</c> est figée à la déclaration
+    /// (impossible de la lier à un <c>[Parameter]</c> de couleur comme Pine permet via
+    /// <c>input.color()</c>). L'utilisateur peut customiser via le clic-droit cAlgo
+    /// → Settings → output color.</para>
+    /// </summary>
+    [Indicator(IsOverlay = true, AccessRights = AccessRights.None, AutoRescale = false)]
+    public class Layout : Indicator
+    {
+        // ============================================================
+        // Constantes (defaults projet, figées par les specs Pine)
+        // ============================================================
+        private const int    BbcLength    = 20;
+        private const double BbcMultInner = 2.0;
+        private const double BbcMultOuter = 2.5;
+
+        // ============================================================
+        // Parameters
+        // ============================================================
+
+        [Parameter("BBc activé", DefaultValue = true, Group = "Bollinger Classique")]
+        public bool BbcEnabled { get; set; }
+
+        [Parameter("BBc mode", DefaultValue = "ribbon", Group = "Bollinger Classique")]
+        public string BbcMode { get; set; }  // "ribbon" | "simple"
+
+        [Parameter("Bandes plates activées", DefaultValue = true, Group = "Bandes Plates")]
+        public bool FlatEnabled { get; set; }
+
+        [Parameter("Période flat", DefaultValue = 2, MinValue = 1, MaxValue = 20, Group = "Bandes Plates")]
+        public int FlatPeriod { get; set; }
+
+        [Parameter("Seuil flat %", DefaultValue = 0.015, MinValue = 0.001, MaxValue = 1.0, Step = 0.001, Group = "Bandes Plates")]
+        public double FlatThreshold { get; set; }
+
+        // ============================================================
+        // Outputs — Bollinger Classique
+        // ============================================================
+        // Outer : bandes principales, gris (base) — toujours plottées si BBc activé.
+        // Inner : bandes intermédiaires, visibles uniquement en mode ribbon (NaN trick).
+        // Accent : overlay bull/bear quand flat/closing en mode non-ribbon (NaN trick).
+
+        [Output("BBc Outer Upper", LineColor = "#9c9c9c", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries BbcOuterUpper { get; set; }
+
+        [Output("BBc Outer Lower", LineColor = "#9c9c9c", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries BbcOuterLower { get; set; }
+
+        [Output("BBc Inner Upper", LineColor = "#9c9c9c", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries BbcInnerUpper { get; set; }
+
+        [Output("BBc Inner Lower", LineColor = "#9c9c9c", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries BbcInnerLower { get; set; }
+
+        [Output("BBc Accent Upper", LineColor = "Red",   PlotType = PlotType.Line, Thickness = 2)]
+        public IndicatorDataSeries BbcAccentUpper { get; set; }
+
+        [Output("BBc Accent Lower", LineColor = "Green", PlotType = PlotType.Line, Thickness = 2)]
+        public IndicatorDataSeries BbcAccentLower { get; set; }
+
+        // ============================================================
+        // Lifecycle
+        // ============================================================
+
+        protected override void Initialize()
+        {
+            // Pas d'état persistant à initialiser pour BBc seul.
+            // Les Supertrend / IndicatorDataSeries mémoire seront créés ici aux étapes suivantes.
+        }
+
+        public override void Calculate(int index)
+        {
+            if (!BbcEnabled) return;
+            if (index < BbcLength - 1) return;
+
+            // Compute Bollinger bands via Core lib.
+            var (_, iU, iL, oU, oL) = Bollinger.Bands(Bars.ClosePrices, index, BbcLength, BbcMultInner, BbcMultOuter);
+
+            BbcOuterUpper[index] = oU;
+            BbcOuterLower[index] = oL;
+
+            // Inner bands : visibles en mode ribbon uniquement.
+            bool isRibbon = BbcMode == "ribbon";
+            BbcInnerUpper[index] = isRibbon ? iU : double.NaN;
+            BbcInnerLower[index] = isRibbon ? iL : double.NaN;
+
+            // Détection flat / closing sur les bandes outer.
+            // Hoist explicite hors du `||` (cohérent avec le pattern Pine isClosingSeries) :
+            // C# court-circuite `||`, mais nos helpers sont stateless (pas de risque de
+            // désynchro historique), donc OK ici. On garde le hoist pour lisibilité.
+            bool upperFlat    = FlatEnabled && Series.IsFlatSeries(BbcOuterUpper,    index, FlatPeriod, FlatThreshold);
+            bool upperClosing = FlatEnabled && Series.IsClosingSeries(BbcOuterUpper, index, FlatPeriod, FlatThreshold, true);
+            bool lowerFlat    = FlatEnabled && Series.IsFlatSeries(BbcOuterLower,    index, FlatPeriod, FlatThreshold);
+            bool lowerClosing = FlatEnabled && Series.IsClosingSeries(BbcOuterLower, index, FlatPeriod, FlatThreshold, false);
+
+            // Accent : visible en mode non-ribbon quand la bande est plate ou en fermeture.
+            BbcAccentUpper[index] = (!isRibbon && (upperFlat || upperClosing)) ? oU : double.NaN;
+            BbcAccentLower[index] = (!isRibbon && (lowerFlat || lowerClosing)) ? oL : double.NaN;
+        }
+    }
+}

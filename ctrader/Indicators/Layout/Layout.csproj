@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>2Ai.Indicators.Layout</AssemblyName>
+    <RootNamespace>_2Ai.Indicators.Layout</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="cAlgo.API">
+      <HintPath>$(USERPROFILE)\Documents\cAlgo\API\cAlgo.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Référence projet vers Core (build-time). À l'exécution, cAlgo doit pouvoir charger
+         2Ai.Indicators.Core.dll — typiquement copié dans le même dossier que Layout.dll, ou
+         dans le dossier References de cAlgo Sources/Indicators. -->
+    <ProjectReference Include="..\..\Core\Core.csproj" />
+  </ItemGroup>
+
+</Project>
