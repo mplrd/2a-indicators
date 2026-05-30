@@ -35,6 +35,8 @@ namespace _2Ai.Indicators.Layout
         private const int    StAtrPeriod = 10;
         private const double StFactor    = 3.0;
 
+        private const int ProjectBars = 3;
+
         // ============================================================
         // Parameters
         // ============================================================
@@ -84,6 +86,12 @@ namespace _2Ai.Indicators.Layout
 
         [Parameter("Supertrend activé", DefaultValue = false, Group = "Supertrend")]
         public bool StEnabled { get; set; }
+
+        [Parameter("Projeter MA",  DefaultValue = true, Group = "Projections")]
+        public bool ProjectMa { get; set; }
+
+        [Parameter("Projeter BB",  DefaultValue = true, Group = "Projections")]
+        public bool ProjectBb { get; set; }
 
         [Parameter("Bandes plates activées", DefaultValue = true, Group = "Bandes Plates")]
         public bool FlatEnabled { get; set; }
@@ -258,6 +266,71 @@ namespace _2Ai.Indicators.Layout
 
             CalculateIchimoku(index);
             CalculateSupertrend(index);
+
+            // Projections : redraw sur la dernière barre (chaque tick en live), updates les
+            // Chart.DrawTrendLine en place via leur nom unique. Aucun objet à nettoyer.
+            if (index == Bars.Count - 1)
+                DrawProjections(index);
+        }
+
+        /// <summary>
+        /// Dessine les lignes de projection (MA basis + BB outer/inner) en pointillé sur les
+        /// `ProjectBars` prochaines barres. Appelé uniquement sur la dernière barre — chaque
+        /// `Chart.DrawTrendLine` avec un nom unique UPDATE la ligne existante (pas de leak).
+        /// </summary>
+        private void DrawProjections(int index)
+        {
+            var t1 = Bars.OpenTimes[index];
+            // Durée d'une barre : différence entre 2 barres adjacentes. Fallback 1h si pas
+            // assez d'historique (cas dégénéré, ne devrait jamais se produire à index == Bars.Count - 1).
+            var barSpan = index > 0 ? t1 - Bars.OpenTimes[index - 1] : System.TimeSpan.FromHours(1);
+            var t2 = t1.Add(System.TimeSpan.FromTicks(barSpan.Ticks * ProjectBars));
+
+            if (ProjectMa)
+            {
+                if (Ma7Enabled)
+                    Draw.DrawProjection(Chart, "Layout_MA7_proj",   t1, Ma7Basis[index],   t2,
+                        MovingAverages.ProjectSma(Bars.ClosePrices, index, 7,   ProjectBars), Color.Aqua,   1);
+                if (Ma20Enabled)
+                    Draw.DrawProjection(Chart, "Layout_MA20_proj",  t1, Ma20Basis[index],  t2,
+                        MovingAverages.ProjectSma(Bars.ClosePrices, index, 20,  ProjectBars), Color.Blue,   1);
+                if (Ma50Enabled)
+                    Draw.DrawProjection(Chart, "Layout_MA50_proj",  t1, Ma50Basis[index],  t2,
+                        MovingAverages.ProjectSma(Bars.ClosePrices, index, 50,  ProjectBars), Color.Orange, 2);
+                if (Ma200Enabled)
+                    Draw.DrawProjection(Chart, "Layout_MA200_proj", t1, Ma200Basis[index], t2,
+                        MovingAverages.ProjectSma(Bars.ClosePrices, index, 200, ProjectBars), Color.Gray,   2);
+            }
+
+            if (ProjectBb)
+            {
+                if (BbcEnabled)
+                {
+                    var (_, iU, iL, oU, oL) = Bollinger.ProjectBands(Bars.ClosePrices, index,
+                        BbcLength, BbcMultInner, BbcMultOuter, ProjectBars);
+                    var bbcCol = Color.FromHex("#9c9c9c");
+                    Draw.DrawProjection(Chart, "Layout_BBc_OU_proj", t1, BbcOuterUpper[index], t2, oU, bbcCol, 1);
+                    Draw.DrawProjection(Chart, "Layout_BBc_OL_proj", t1, BbcOuterLower[index], t2, oL, bbcCol, 1);
+                    if (BbcMode == "ribbon")
+                    {
+                        Draw.DrawProjection(Chart, "Layout_BBc_IU_proj", t1, BbcInnerUpper[index], t2, iU, bbcCol, 1);
+                        Draw.DrawProjection(Chart, "Layout_BBc_IL_proj", t1, BbcInnerLower[index], t2, iL, bbcCol, 1);
+                    }
+                }
+                if (BbmEnabled)
+                {
+                    var (_, iU, iL, oU, oL) = Bollinger.ProjectBands(Bars.ClosePrices, index,
+                        BbmLength, BbmMultInner, BbmMultOuter, ProjectBars);
+                    var bbmCol = Color.FromHex("#808080");
+                    Draw.DrawProjection(Chart, "Layout_BBm_OU_proj", t1, BbmOuterUpper[index], t2, oU, bbmCol, 2);
+                    Draw.DrawProjection(Chart, "Layout_BBm_OL_proj", t1, BbmOuterLower[index], t2, oL, bbmCol, 2);
+                    if (BbmMode == "ribbon")
+                    {
+                        Draw.DrawProjection(Chart, "Layout_BBm_IU_proj", t1, BbmInnerUpper[index], t2, iU, bbmCol, 1);
+                        Draw.DrawProjection(Chart, "Layout_BBm_IL_proj", t1, BbmInnerLower[index], t2, iL, bbmCol, 1);
+                    }
+                }
+            }
         }
 
         /// <summary>
