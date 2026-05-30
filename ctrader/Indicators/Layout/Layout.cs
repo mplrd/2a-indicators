@@ -14,7 +14,7 @@ namespace _2Ai.Indicators.Layout
     /// → Settings → output color.</para>
     /// </summary>
     [Indicator(IsOverlay = true, AccessRights = AccessRights.None, AutoRescale = false)]
-    [Cloud("Kumo", "Senkou A", "Senkou B", FirstColor = "Lime", SecondColor = "Maroon", Opacity = 0.3)]
+    [Cloud("Senkou A", "Senkou B", FirstColor = "Lime", SecondColor = "Maroon")]
     public class Layout : Indicator
     {
         // ============================================================
@@ -240,7 +240,7 @@ namespace _2Ai.Indicators.Layout
 
         protected override void Initialize()
         {
-            _atr       = Indicators.AverageTrueRange(StAtrPeriod, MovingAverageType.Wilder);
+            _atr       = Indicators.AverageTrueRange(StAtrPeriod, MovingAverageType.WilderSmoothing);
             _stLineMem = CreateDataSeries();
             _stDirMem  = CreateDataSeries();
         }
