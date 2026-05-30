@@ -14,6 +14,7 @@ namespace _2Ai.Indicators.Layout
     /// → Settings → output color.</para>
     /// </summary>
     [Indicator(IsOverlay = true, AccessRights = AccessRights.None, AutoRescale = false)]
+    [Cloud("Kumo", "Senkou A", "Senkou B", FirstColor = "Lime", SecondColor = "Maroon", Opacity = 0.3)]
     public class Layout : Indicator
     {
         // ============================================================
@@ -26,6 +27,10 @@ namespace _2Ai.Indicators.Layout
         private const int    BbmLength    = 160;
         private const double BbmMultInner = 2.5;
         private const double BbmMultOuter = 2.8;
+
+        private const int IchiTenkanLen = 9;
+        private const int IchiKijunLen  = 26;
+        private const int IchiSenkouLen = 52;
 
         // ============================================================
         // Parameters
@@ -66,6 +71,13 @@ namespace _2Ai.Indicators.Layout
 
         [Parameter("MA200 mode",    DefaultValue = "simple", Group = "MA200")]
         public string Ma200Mode { get; set; }
+
+        [Parameter("Ichimoku activé",   DefaultValue = true, Group = "Ichimoku")]
+        public bool IchiEnabled { get; set; }
+
+        // Si activé, masque Tenkan/Kijun/Senkou A&B/Kumo et n'affiche que le Chikou Span.
+        [Parameter("Chikou uniquement", DefaultValue = true, Group = "Ichimoku")]
+        public bool IchiChikouOnly { get; set; }
 
         [Parameter("Bandes plates activées", DefaultValue = true, Group = "Bandes Plates")]
         public bool FlatEnabled { get; set; }
@@ -164,6 +176,30 @@ namespace _2Ai.Indicators.Layout
         public IndicatorDataSeries Ma200Lower { get; set; }
 
         // ============================================================
+        // Outputs — Ichimoku (Senkou A/B décalés +kijun, Chikou décalé −kijun)
+        // ============================================================
+        // Décalages temporels appliqués au WRITE :
+        //   - Senkou A/B : on écrit à l'index `index + IchiKijunLen` (forward shift),
+        //     cAlgo gère l'extension de la série future.
+        //   - Chikou     : on écrit à l'index `index - IchiKijunLen` (backward shift)
+        //     dans la même Calculate() — chaque appel rétro-actualise le slot ancien.
+
+        [Output("Tenkan",   LineColor = "#d4a017", PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries IchiTenkan { get; set; }
+
+        [Output("Kijun",    LineColor = "Blue",    PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries IchiKijun { get; set; }
+
+        [Output("Senkou A", LineColor = "Lime",    PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries IchiSenkouA { get; set; }
+
+        [Output("Senkou B", LineColor = "Maroon",  PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries IchiSenkouB { get; set; }
+
+        [Output("Chikou",   LineColor = "Black",   PlotType = PlotType.Line, Thickness = 1)]
+        public IndicatorDataSeries IchiChikou { get; set; }
+
+        // ============================================================
         // Lifecycle
         // ============================================================
 
@@ -191,6 +227,37 @@ namespace _2Ai.Indicators.Layout
             CalculateMa(index, Ma20Enabled,  Ma20Mode  == "ribbon", 20,  Ma20Basis,  Ma20Upper,  Ma20Lower);
             CalculateMa(index, Ma50Enabled,  Ma50Mode  == "ribbon", 50,  Ma50Basis,  Ma50Upper,  Ma50Lower);
             CalculateMa(index, Ma200Enabled, Ma200Mode == "ribbon", 200, Ma200Basis, Ma200Upper, Ma200Lower);
+
+            CalculateIchimoku(index);
+        }
+
+        /// <summary>
+        /// Calcule le block Ichimoku pour un index donné. Senkou A/B forward-shift de +kijun bars,
+        /// Chikou backward-shift de −kijun bars (via écriture aux index décalés). Si l'option
+        /// "Chikou uniquement" est activée, masque Tenkan/Kijun/Senkou A/B (Kumo s'éteint avec eux).
+        /// </summary>
+        private void CalculateIchimoku(int index)
+        {
+            if (!IchiEnabled || index < IchiSenkouLen - 1)
+                return;
+
+            var (tenkan, kijun, senkouA, senkouB, chikou) = Ichimoku.Components(
+                Bars.HighPrices, Bars.LowPrices, Bars.ClosePrices, index,
+                IchiTenkanLen, IchiKijunLen, IchiSenkouLen);
+
+            bool mainOn = !IchiChikouOnly;
+
+            IchiTenkan[index] = mainOn ? tenkan : double.NaN;
+            IchiKijun[index]  = mainOn ? kijun  : double.NaN;
+
+            // Senkou A/B : forward shift +kijun bars (cAlgo gère l'extension de la série).
+            int senkouIdx = index + IchiKijunLen;
+            IchiSenkouA[senkouIdx] = mainOn ? senkouA : double.NaN;
+            IchiSenkouB[senkouIdx] = mainOn ? senkouB : double.NaN;
+
+            // Chikou : backward shift -kijun bars. Toujours rendu si Ichimoku activé.
+            if (index >= IchiKijunLen)
+                IchiChikou[index - IchiKijunLen] = chikou;
         }
 
         /// <summary>
