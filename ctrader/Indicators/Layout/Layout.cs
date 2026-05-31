@@ -15,6 +15,15 @@ namespace _2Ai.Indicators.Layout
     /// </summary>
     [Indicator(IsOverlay = true, AccessRights = AccessRights.None, AutoRescale = false)]
     [Cloud("Senkou A", "Senkou B", FirstColor = "Lime", SecondColor = "Maroon")]
+    // Ruban BB (mode ribbon) : un cloud gris continu entre outer et inner. Géométrie continue
+    // → suit la bande sans diagonale ni pont NaN. La mise en évidence de platitude se fait par
+    // le BORD coloré (accent bull/bear par barre, cf. outputs Accent), PAS par la couleur du
+    // fond : cAlgo ne sait pas colorer un cloud par barre sans rampe diagonale d'une barre.
+    // En mode simple l'inner vaut NaN → le cloud ne se dessine pas (fill réservé au ribbon).
+    [Cloud("BBc Outer Upper", "BBc Inner Upper", FirstColor = "#9C9C9C", Opacity = 0.15)]
+    [Cloud("BBc Outer Lower", "BBc Inner Lower", FirstColor = "#9C9C9C", Opacity = 0.15)]
+    [Cloud("BBm Outer Upper", "BBm Inner Upper", FirstColor = "#808080", Opacity = 0.15)]
+    [Cloud("BBm Outer Lower", "BBm Inner Lower", FirstColor = "#808080", Opacity = 0.15)]
     public class Layout : Indicator
     {
         // ============================================================
@@ -107,7 +116,7 @@ namespace _2Ai.Indicators.Layout
         // ============================================================
         // Outer : bandes principales, gris (base) — toujours plottées si BBc activé.
         // Inner : bandes intermédiaires, visibles uniquement en mode ribbon (NaN trick).
-        // Accent : overlay bull/bear quand flat/closing en mode non-ribbon (NaN trick).
+        // Accent : bord bull/bear quand flat/closing, dans les 2 modes (NaN trick + DiscontinuousLine).
 
         [Output("BBc Outer Upper", LineColor = "#9c9c9c", PlotType = PlotType.Line, Thickness = 1)]
         public IndicatorDataSeries BbcOuterUpper { get; set; }
@@ -121,10 +130,12 @@ namespace _2Ai.Indicators.Layout
         [Output("BBc Inner Lower", LineColor = "#9c9c9c", PlotType = PlotType.Line, Thickness = 1)]
         public IndicatorDataSeries BbcInnerLower { get; set; }
 
-        [Output("BBc Accent Upper", LineColor = "Red",   PlotType = PlotType.Line, Thickness = 2)]
+        // DiscontinuousLine (pas Line) : sinon cAlgo relie les segments plats par une corde droite
+        // par-dessus les trous NaN (zones ouvertes) → trait fantôme décalé de la bande courbe.
+        [Output("BBc Accent Upper", LineColor = "Red",   PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
         public IndicatorDataSeries BbcAccentUpper { get; set; }
 
-        [Output("BBc Accent Lower", LineColor = "Green", PlotType = PlotType.Line, Thickness = 2)]
+        [Output("BBc Accent Lower", LineColor = "Green", PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
         public IndicatorDataSeries BbcAccentLower { get; set; }
 
         // ============================================================
@@ -143,10 +154,10 @@ namespace _2Ai.Indicators.Layout
         [Output("BBm Inner Lower", LineColor = "#808080", PlotType = PlotType.Line, Thickness = 1)]
         public IndicatorDataSeries BbmInnerLower { get; set; }
 
-        [Output("BBm Accent Upper", LineColor = "Red",   PlotType = PlotType.Line, Thickness = 3)]
+        [Output("BBm Accent Upper", LineColor = "Red",   PlotType = PlotType.DiscontinuousLine, Thickness = 3)]
         public IndicatorDataSeries BbmAccentUpper { get; set; }
 
-        [Output("BBm Accent Lower", LineColor = "Green", PlotType = PlotType.Line, Thickness = 3)]
+        [Output("BBm Accent Lower", LineColor = "Green", PlotType = PlotType.DiscontinuousLine, Thickness = 3)]
         public IndicatorDataSeries BbmAccentLower { get; set; }
 
         // ============================================================
@@ -456,7 +467,8 @@ namespace _2Ai.Indicators.Layout
             outerUpper[index] = oU;
             outerLower[index] = oL;
 
-            // Inner bands : visibles en mode ribbon uniquement.
+            // Inner bands : visibles en mode ribbon uniquement. Elles bornent aussi le cloud gris
+            // du ruban (cf. clouds en tête de classe) → NaN en simple = pas de fill.
             innerUpper[index] = isRibbon ? iU : double.NaN;
             innerLower[index] = isRibbon ? iL : double.NaN;
 
@@ -466,9 +478,11 @@ namespace _2Ai.Indicators.Layout
             bool lowerFlat    = FlatEnabled && Series.IsFlatSeries(outerLower,    index, FlatPeriod, FlatThreshold);
             bool lowerClosing = FlatEnabled && Series.IsClosingSeries(outerLower, index, FlatPeriod, FlatThreshold, false);
 
-            // Accent : visible en mode non-ribbon quand la bande est plate ou en fermeture.
-            accentUpper[index] = (!isRibbon && (upperFlat || upperClosing)) ? oU : double.NaN;
-            accentLower[index] = (!isRibbon && (lowerFlat || lowerClosing)) ? oL : double.NaN;
+            // Accent = bord coloré bull/bear sur la bande outer quand plate/fermeture. Affiché
+            // dans LES DEUX modes (en ribbon il colore le bord du ruban gris, par barre, sans
+            // diagonale ; en simple il surligne la bande). DiscontinuousLine côté output.
+            accentUpper[index] = (upperFlat || upperClosing) ? oU : double.NaN;
+            accentLower[index] = (lowerFlat || lowerClosing) ? oL : double.NaN;
         }
     }
 }
