@@ -209,7 +209,6 @@ namespace _2Ai.Indicators.Levels
             bool showMaD = tfSec < 86400, showMaW = tfSec < 604800;
             bool showBBmH1 = tfSec < 3600, showBBmH4 = tfSec < 14400, showBBmD = tfSec < 86400, showBBmW = tfSec < 604800;
             bool showBBcH4 = tfSec < 14400, showBBcD = tfSec < 86400, showBBcW = tfSec < 604800;
-            var dynStart = Bars.OpenTimes[Math.Max(0, index - 80)];  // ancrage gauche des niveaux dynamiques
 
             // ATH (toujours TF-allowed).
             DrawHtf("ATH", AthEnabled, _ath.Value, _ath.Time ?? now, now, AthColor, AthWidth, LineStyle.Lines, "ATH", true);
@@ -253,7 +252,7 @@ namespace _2Ai.Indicators.Levels
             // --- Niveaux dynamiques (Supertrend / BB / MA) — ligne horizontale dynStart→now ---
             double close = Bars.ClosePrices[index];
             void Dyn(string id, bool show, double value, Color color, int width, string label)
-                => DrawDynamic(id, show, value, color, width, dynStart, now, label);
+                => DrawDynamic(id, show, value, color, width, label);
             Color Pos(double v) => v > close ? DynBear : DynBull;  // au-dessus du prix → bear
             void Bb(string idU, string idL, bool show, Bars bars, int length, double mi, double mo, int width, string lbl)
             {
@@ -318,11 +317,10 @@ namespace _2Ai.Indicators.Levels
         /// Niveau dynamique (Supertrend / BB / MA) : ligne horizontale solide de
         /// <paramref name="start"/> à <paramref name="end"/>. Désactivé ou NaN → retiré.
         /// </summary>
-        private void DrawDynamic(string id, bool show, double value, Color color, int width,
-            DateTime start, DateTime end, string label)
+        private void DrawDynamic(string id, bool show, double value, Color color, int width, string label)
         {
             double v = (show && !double.IsNaN(value)) ? value : double.NaN;
-            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, LineStyle.Solid, label, ShowLabels);
+            Draw.DrawHorizontalLevel(Chart, "Lvl_" + id, v, color, width, LineStyle.Solid, label, ShowLabels, Bars.OpenTimes.LastValue);
         }
     }
 }

@@ -88,5 +88,34 @@ namespace _2Ai.Indicators.Core
                 chart.RemoveObject(name + "_lbl");
             }
         }
+
+        /// <summary>
+        /// Dessine un niveau horizontal PLEINE LARGEUR (traverse tout le chart), pour les niveaux
+        /// dynamiques (Supertrend / BB / MA) qui n'ont pas d'origine de période. Label optionnel
+        /// ancré au temps <paramref name="labelTime"/> (typiquement la dernière barre). NaN → retiré.
+        /// </summary>
+        public static void DrawHorizontalLevel(Chart chart, string name, double price,
+            Color color, int thickness, LineStyle style, string label, bool showLabel, System.DateTime labelTime)
+        {
+            if (double.IsNaN(price))
+            {
+                chart.RemoveObject(name);
+                chart.RemoveObject(name + "_lbl");
+                return;
+            }
+
+            chart.DrawHorizontalLine(name, price, color, thickness, style);
+
+            if (showLabel && !string.IsNullOrEmpty(label))
+            {
+                var txt = chart.DrawText(name + "_lbl", label, labelTime, price, color);
+                txt.VerticalAlignment = VerticalAlignment.Center;
+                txt.HorizontalAlignment = HorizontalAlignment.Right;
+            }
+            else
+            {
+                chart.RemoveObject(name + "_lbl");
+            }
+        }
     }
 }
