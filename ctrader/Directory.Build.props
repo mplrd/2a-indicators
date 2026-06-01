@@ -1,0 +1,14 @@
+<Project>
+
+  <!-- Centralise TOUTES les sorties de build sous ctrader/artifacts/ (feature .NET 8
+       "artifacts output"), au lieu des bin/obj profonds par projet. Le .algo final reste
+       auto-publié dans %USERPROFILE%\Documents\cAlgo\Sources\Indicators\ par cTrader.Automate
+       (target _CopyToSources). On ne va donc jamais fouiller les bin :
+         - artefacts repo  → ctrader/artifacts/
+         - .algo chargeable → dossier Sources de cTrader -->
+  <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+  </PropertyGroup>
+
+</Project>
