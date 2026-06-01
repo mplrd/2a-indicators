@@ -127,6 +127,17 @@ namespace _2Ai.Indicators.Core
         }
 
         /// <summary>
+        /// Construit l'instant UTC correspondant à l'heure murale <paramref name="year"/>-<paramref name="month"/>-
+        /// <paramref name="day"/> <paramref name="hour"/>:<paramref name="minute"/> dans la TZ donnée.
+        /// Équivalent Pine <c>timestamp(tz, y, mo, dom, hh, mm)</c>. DST géré par le nom IANA.
+        /// </summary>
+        public static DateTime TimestampInTz(string tz, int year, int month, int day, int hour, int minute)
+        {
+            var local = new DateTime(year, month, day, hour, minute, 0, DateTimeKind.Unspecified);
+            return TimeZoneInfo.ConvertTimeToUtc(local, Tz(tz));
+        }
+
+        /// <summary>
         /// Durée d'une barre en secondes = plus PETIT écart positif sur les <paramref name="lookback"/>
         /// dernières barres. Robuste aux week-ends/fériés qui gonflent le dernier écart (ex :
         /// lundi−vendredi en Daily). Retourne <paramref name="fallback"/> si aucun écart valide.
@@ -140,6 +151,34 @@ namespace _2Ai.Indicators.Core
                 if (s > 0 && (span == 0 || s < span)) span = s;
             }
             return span > 0 ? span : fallback;
+        }
+
+        // TF "nominaux" standards en minutes (M1 → Monthly). Sert à classer un chart par span de
+        // barre MESURÉ, robustement : DST/fériés font varier le span réel de ±1 h (une semaine avec
+        // changement d'heure = 7 j − 1 h = 10020 min), ce qui ferait retomber un Weekly dans le
+        // bucket Daily. Pine n'a pas ce souci (timeframe.in_seconds() est nominal) ; on restaure
+        // l'équivalent en snappant au TF standard le plus proche.
+        private static readonly int[] _stdTfMinutes =
+            { 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 45, 60, 120, 180, 240, 360, 480, 720, 1440, 10080, 43200 };
+
+        /// <summary>
+        /// Classe une durée de barre (s) au timeframe standard le plus proche (en minutes), par
+        /// distance en ratio (log) — robuste aux écarts DST/fériés. Équivaut au TF NOMINAL que Pine
+        /// obtient via <c>timeframe.in_seconds()</c>. À utiliser pour toute logique dépendant du TF
+        /// (périodes d'intérêt CMI…), pas <c>round(BarSpanSeconds/60)</c> qui dérive de ±1 h.
+        /// </summary>
+        public static int SnapTfMinutes(double barSeconds)
+        {
+            double m = barSeconds / 60.0;
+            if (m <= 0) return 1;
+            int best = _stdTfMinutes[0];
+            double bestErr = double.MaxValue;
+            foreach (int b in _stdTfMinutes)
+            {
+                double err = Math.Abs(Math.Log(m / b));
+                if (err < bestErr) { bestErr = err; best = b; }
+            }
+            return best;
         }
 
         /// <summary>
