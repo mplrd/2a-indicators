@@ -55,5 +55,38 @@ namespace _2Ai.Indicators.Core
             var line = chart.DrawTrendLine(name, time1, price1, time2, price2, color, thickness, LineStyle.DotsRare);
             return line;
         }
+
+        /// <summary>
+        /// Dessine un niveau de prix horizontal de <paramref name="startTime"/> à
+        /// <paramref name="endTime"/> (typiquement origine de période → dernière barre), avec un
+        /// label optionnel à droite. Équivalent simplifié de Pine <c>drawLevel</c> (le dessin
+        /// cAlgo est temporel : pas de bar_index, on passe des <see cref="System.DateTime"/>).
+        /// Idempotent : nom unique → l'objet est mis à jour en place à chaque redraw. Si
+        /// <paramref name="price"/> est <c>NaN</c>, l'objet (et son label) est retiré.
+        /// </summary>
+        public static void DrawLevel(Chart chart, string name,
+            System.DateTime startTime, System.DateTime endTime, double price,
+            Color color, int thickness, LineStyle style, string label, bool showLabel)
+        {
+            if (double.IsNaN(price))
+            {
+                chart.RemoveObject(name);
+                chart.RemoveObject(name + "_lbl");
+                return;
+            }
+
+            chart.DrawTrendLine(name, startTime, price, endTime, price, color, thickness, style);
+
+            if (showLabel && !string.IsNullOrEmpty(label))
+            {
+                var txt = chart.DrawText(name + "_lbl", label, endTime, price, color);
+                txt.VerticalAlignment = VerticalAlignment.Center;
+                txt.HorizontalAlignment = HorizontalAlignment.Right;
+            }
+            else
+            {
+                chart.RemoveObject(name + "_lbl");
+            }
+        }
     }
 }
