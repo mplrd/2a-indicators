@@ -32,4 +32,10 @@ namespace _2Ai.Indicators.Core
         public static double ProjectSma(DataSeries src, int index, int length, int barsAhead)
             => Series.ProjectMean(src, index, length, barsAhead);
     }
+
+    /// <summary>
+    /// Méthode de lissage zero-lag (équiv enum Pine <c>MaMode</c>). Spectre lag → réactivité :
+    /// DEMA (lisse) → TEMA (intermédiaire) → ZLEMA (réactif).
+    /// </summary>
+    public enum MaMode { DEMA, TEMA, ZLEMA }
 }
