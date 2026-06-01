@@ -38,15 +38,29 @@ namespace _2Ai.Indicators.Core
                 return (double.NaN, 0);
             }
 
-            var hl2 = (high[index] + low[index]) / 2.0;
-            var upperBand = hl2 + factor * atr[index];
-            var lowerBand = hl2 - factor * atr[index];
+            var (line, direction) = Step(
+                high[index], low[index], close[index], close[index - 1], atr[index],
+                factor, lineMemory[index - 1], (int)directionMemory[index - 1]);
 
-            var prevLine = lineMemory[index - 1];
-            var prevDir = (int)directionMemory[index - 1];
-            var prevClose = close[index - 1];
+            lineMemory[index] = line;
+            directionMemory[index] = direction;
+            return (line, direction);
+        }
 
-            // Adjust bands selon le state précédent (formule standard ST)
+        /// <summary>
+        /// Une étape de la récurrence Supertrend (formule standard). Pure : à partir de l'état
+        /// précédent <paramref name="prevLine"/>/<paramref name="prevDir"/>, renvoie le nouvel état.
+        /// Partagée par <see cref="Calculate"/> (état en IndicatorDataSeries) et <see cref="RunLast"/>
+        /// (état local sur barres HTF).
+        /// </summary>
+        private static (double line, int direction) Step(
+            double high, double low, double close, double prevClose, double atr,
+            double factor, double prevLine, int prevDir)
+        {
+            var hl2 = (high + low) / 2.0;
+            var upperBand = hl2 + factor * atr;
+            var lowerBand = hl2 - factor * atr;
+
             double finalUpper, finalLower;
             if (double.IsNaN(prevLine))
             {
@@ -59,7 +73,6 @@ namespace _2Ai.Indicators.Core
                 finalLower = (lowerBand > prevLine || prevClose < prevLine) ? lowerBand : prevLine;
             }
 
-            // Direction logic
             int direction;
             double line;
             if (double.IsNaN(prevLine) || prevDir == 0)
@@ -67,12 +80,12 @@ namespace _2Ai.Indicators.Core
                 direction = 1;
                 line = finalLower;
             }
-            else if (prevDir == 1 && close[index] < finalLower)
+            else if (prevDir == 1 && close < finalLower)
             {
                 direction = -1;
                 line = finalUpper;
             }
-            else if (prevDir == -1 && close[index] > finalUpper)
+            else if (prevDir == -1 && close > finalUpper)
             {
                 direction = 1;
                 line = finalLower;
@@ -83,9 +96,41 @@ namespace _2Ai.Indicators.Core
                 line = prevDir == 1 ? finalLower : finalUpper;
             }
 
-            lineMemory[index] = line;
-            directionMemory[index] = direction;
             return (line, direction);
+        }
+
+        /// <summary>
+        /// Déroule le Supertrend sur des barres ARBITRAIRES (typiquement HTF : Daily/Weekly via
+        /// <c>MarketData.GetBars</c>) jusqu'à la barre contenant <paramref name="uptoTimeUtc"/>, et
+        /// renvoie sa dernière valeur+direction. État local (pas d'IndicatorDataSeries, qui sont
+        /// alignées sur le chart). Équivaut au <c>request.security(tf, st.run(...), lookahead_on)</c>
+        /// Pine : on lit la valeur du Supertrend du TF supérieur à l'instant courant (niveau live).
+        /// </summary>
+        public static (double line, int direction) RunLast(
+            Bars bars, DataSeries atr, double factor, System.DateTime uptoTimeUtc)
+        {
+            int last = bars.OpenTimes.GetIndexByTime(uptoTimeUtc);
+            if (last < 1) return (double.NaN, 0);
+
+            double prevLine = double.NaN;
+            int prevDir = 0;
+            double line = double.NaN;
+            int dir = 0;
+
+            for (int i = 1; i <= last; i++)
+            {
+                if (double.IsNaN(atr[i]))
+                {
+                    prevLine = double.NaN; prevDir = 0;
+                    line = double.NaN; dir = 0;
+                    continue;
+                }
+                (line, dir) = Step(
+                    bars.HighPrices[i], bars.LowPrices[i], bars.ClosePrices[i], bars.ClosePrices[i - 1],
+                    atr[i], factor, prevLine, prevDir);
+                prevLine = line; prevDir = dir;
+            }
+            return (line, dir);
         }
     }
 }

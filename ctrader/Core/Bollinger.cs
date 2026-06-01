@@ -49,6 +49,33 @@ namespace _2Ai.Indicators.Core
         }
 
         /// <summary>
+        /// Niveaux HTF : bandes outer + flag "à dessiner" par côté = la bande est plate OU en
+        /// fermeture (sur <paramref name="flatLen"/> barres, seuil <paramref name="flatThr"/> en %).
+        /// Équivaut à Pine <c>bb.bHtfLevels</c>. Mêmes définitions de pente/plat/fermeture que
+        /// <see cref="Series"/> (calculées ici inline car on n'a pas la bande outer sous forme de
+        /// série — on évalue à <paramref name="index"/> et <c>index - flatLen</c>).
+        /// </summary>
+        /// <returns>(outerUpper, outerLower, drawUpper, drawLower).</returns>
+        public static (double outerUpper, double outerLower, bool drawUpper, bool drawLower)
+            HtfLevels(DataSeries src, int index, int length, double multInner, double multOuter, int flatLen, double flatThr)
+        {
+            var (_, _, _, oU, oL) = Bands(src, index, length, multInner, multOuter);
+            if (index < length - 1 + flatLen || double.IsNaN(oU))
+                return (oU, oL, false, false);
+
+            var (_, _, _, oUp, oLp) = Bands(src, index - flatLen, length, multInner, multOuter);
+
+            double slopeU = oUp == 0.0 ? double.NaN : (oU - oUp) / oUp * 100.0;
+            double slopeL = oLp == 0.0 ? double.NaN : (oL - oLp) / oLp * 100.0;
+
+            // flat = |pente| < seuil ; closing = |pente| >= seuil ET sens de fermeture
+            // (bande haute : pente < 0 ; bande basse : pente > 0). Mutuellement exclusifs.
+            bool drawU = !double.IsNaN(slopeU) && (Math.Abs(slopeU) < flatThr || slopeU < 0.0);
+            bool drawL = !double.IsNaN(slopeL) && (Math.Abs(slopeL) < flatThr || slopeL > 0.0);
+            return (oU, oL, drawU, drawL);
+        }
+
+        /// <summary>
         /// Projette les bandes de Bollinger <paramref name="barsAhead"/> barres dans le futur,
         /// sous l'hypothèse que <paramref name="src"/> reste constant à sa valeur courante.
         /// <para>Basis : projection exacte via <see cref="Series.ProjectMean"/>.</para>

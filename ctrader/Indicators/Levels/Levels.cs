@@ -72,6 +72,34 @@ namespace _2Ai.Indicators.Levels
         [Parameter("Open US", DefaultValue = false, Group = "Niveaux Intraday")]
         public bool OpenUsEnabled { get; set; }
 
+        // === Niveaux dynamiques (Supertrend / BB / MA) ===
+        [Parameter("Supertrend D", DefaultValue = true, Group = "Niveaux dynamiques")]
+        public bool StDEnabled { get; set; }
+        [Parameter("ST D width", DefaultValue = 2, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
+        public int StDWidth { get; set; }
+        [Parameter("Supertrend W", DefaultValue = true, Group = "Niveaux dynamiques")]
+        public bool StWEnabled { get; set; }
+        [Parameter("ST W width", DefaultValue = 3, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
+        public int StWWidth { get; set; }
+
+        [Parameter("BB Magique", DefaultValue = true, Group = "Niveaux dynamiques")]
+        public bool BbmEnabled { get; set; }
+        [Parameter("BB Magique width", DefaultValue = 3, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
+        public int BbmWidth { get; set; }
+        [Parameter("BB Classique", DefaultValue = true, Group = "Niveaux dynamiques")]
+        public bool BbcEnabled { get; set; }
+        [Parameter("BB Classique width", DefaultValue = 2, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
+        public int BbcWidth { get; set; }
+
+        [Parameter("MA 50", DefaultValue = true, Group = "Niveaux dynamiques")]
+        public bool Ma50Enabled { get; set; }
+        [Parameter("MA 50 width", DefaultValue = 2, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
+        public int Ma50Width { get; set; }
+        [Parameter("MA 200", DefaultValue = true, Group = "Niveaux dynamiques")]
+        public bool Ma200Enabled { get; set; }
+        [Parameter("MA 200 width", DefaultValue = 2, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
+        public int Ma200Width { get; set; }
+
         // === Paramètres des Sessions (heures HHMM-HHMM + TZ IANA) ===
         [Parameter("Asiatique", DefaultValue = "0800-1400", Group = "Paramètres des Sessions")]
         public string AsianSession { get; set; }
@@ -105,21 +133,44 @@ namespace _2Ai.Indicators.Levels
         private static readonly Color UsColor      = Color.Purple;
         private static readonly Color OrColor      = Color.Black;
 
+        // Niveaux dynamiques : couleurs bull/bear partagées (ST par direction ; BB/MA par position).
+        private static readonly Color DynBull = Color.Green;
+        private static readonly Color DynBear = Color.Red;
+        // Defaults projet (hardcodés comme dans Layout) : ST ATR/factor, BB longueurs/mult, flat.
+        private const int    StAtrPeriod = 10;
+        private const double StFactor    = 3.0;
+        private const int    BbmLength = 160; private const double BbmMultInner = 2.5, BbmMultOuter = 2.8;
+        private const int    BbcLength = 20;  private const double BbcMultInner = 2.0, BbcMultOuter = 2.5;
+        private const int    FlatPeriod = 2;  private const double FlatThreshold = 0.015;
+
         // ============================================================
         // État interne
         // ============================================================
-        private Bars _daily, _weekly, _monthly;
+        private Bars _daily, _weekly, _monthly, _h1, _h4;
         private AllTimeHigh _ath;
         private SessionRange _asian, _eu, _us;
         private SessionOpen _asianOpen, _euOpen, _usOpen, _futureOpen;
         private OpenRange _or;
+        // ATR (Supertrend) et MA sur barres HTF.
+        private cAlgo.API.Indicators.AverageTrueRange _atrD, _atrW;
+        private cAlgo.API.Indicators.SimpleMovingAverage _ma50D, _ma50W, _ma200D, _ma200W;
 
         protected override void Initialize()
         {
             _daily   = MarketData.GetBars(TimeFrame.Daily);
             _weekly  = MarketData.GetBars(TimeFrame.Weekly);
             _monthly = MarketData.GetBars(TimeFrame.Monthly);
+            _h1      = MarketData.GetBars(TimeFrame.Hour);
+            _h4      = MarketData.GetBars(TimeFrame.Hour4);
             _ath     = new AllTimeHigh();
+
+            // ATR (Wilder) + MA sur barres HTF pour Supertrend / MA dynamiques.
+            _atrD = Indicators.AverageTrueRange(_daily,  StAtrPeriod, MovingAverageType.WilderSmoothing);
+            _atrW = Indicators.AverageTrueRange(_weekly, StAtrPeriod, MovingAverageType.WilderSmoothing);
+            _ma50D  = Indicators.SimpleMovingAverage(_daily.ClosePrices,  50);
+            _ma50W  = Indicators.SimpleMovingAverage(_weekly.ClosePrices, 50);
+            _ma200D = Indicators.SimpleMovingAverage(_daily.ClosePrices,  200);
+            _ma200W = Indicators.SimpleMovingAverage(_weekly.ClosePrices, 200);
 
             _asian = new SessionRange(AsianSession, AsianTz, ChartTz);
             _eu    = new SessionRange(EuSession,    EuTz,    ChartTz);
@@ -153,6 +204,12 @@ namespace _2Ai.Indicators.Levels
             bool showWeekly  = tfSec <= 604800;      // <= W
             bool showMonthly = tfSec <= 2629800;     // <= M (mois moyen)
             bool showIntraday = tfSec < 3600;        // < H1 (sessions / opens / open range)
+            // Dynamiques : strict < TF cible (on ne double pas avec Layout sur l'UT propre).
+            bool showSTD = tfSec < 86400, showSTW = tfSec < 604800;
+            bool showMaD = tfSec < 86400, showMaW = tfSec < 604800;
+            bool showBBmH1 = tfSec < 3600, showBBmH4 = tfSec < 14400, showBBmD = tfSec < 86400, showBBmW = tfSec < 604800;
+            bool showBBcH4 = tfSec < 14400, showBBcD = tfSec < 86400, showBBcW = tfSec < 604800;
+            var dynStart = Bars.OpenTimes[Math.Max(0, index - 80)];  // ancrage gauche des niveaux dynamiques
 
             // ATH (toujours TF-allowed).
             DrawHtf("ATH", AthEnabled, _ath.Value, _ath.Time ?? now, now, AthColor, AthWidth, LineStyle.Lines, "ATH", true);
@@ -192,6 +249,45 @@ namespace _2Ai.Indicators.Levels
             // Open Range : H/L figés après 60 min, ligne ongoing toute la journée chart.
             DrawSession("OrH", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.High, _or.StartUtc, now, OrColor, OrWidth, LineStyle.Dots, "OR H");
             DrawSession("OrL", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.Low,  _or.StartUtc, now, OrColor, OrWidth, LineStyle.Dots, "OR L");
+
+            // --- Niveaux dynamiques (Supertrend / BB / MA) — ligne horizontale dynStart→now ---
+            double close = Bars.ClosePrices[index];
+            void Dyn(string id, bool show, double value, Color color, int width, string label)
+                => DrawDynamic(id, show, value, color, width, dynStart, now, label);
+            Color Pos(double v) => v > close ? DynBear : DynBull;  // au-dessus du prix → bear
+            void Bb(string idU, string idL, bool show, Bars bars, int length, double mi, double mo, int width, string lbl)
+            {
+                int li = bars.OpenTimes.GetIndexByTime(now);
+                double oU = double.NaN, oL = double.NaN; bool dU = false, dL = false;
+                if (li >= 0)
+                {
+                    var r = Bollinger.HtfLevels(bars.ClosePrices, li, length, mi, mo, FlatPeriod, FlatThreshold);
+                    oU = r.outerUpper; oL = r.outerLower; dU = r.drawUpper; dL = r.drawLower;
+                }
+                Dyn(idU, show && dU, oU, Pos(oU), width, lbl);
+                Dyn(idL, show && dL, oL, Pos(oL), width, lbl);
+            }
+
+            // Supertrend D/W : couleur par DIRECTION (bull/bear), pas par position.
+            var (stDVal, stDDir) = Supertrend.RunLast(_daily,  _atrD.Result, StFactor, now);
+            var (stWVal, stWDir) = Supertrend.RunLast(_weekly, _atrW.Result, StFactor, now);
+            Dyn("StD", StDEnabled && showSTD, stDVal, stDDir > 0 ? DynBull : DynBear, StDWidth, "ST D");
+            Dyn("StW", StWEnabled && showSTW, stWVal, stWDir > 0 ? DynBull : DynBear, StWWidth, "ST W");
+
+            // MA 50 / 200 sur D/W : couleur par position.
+            Dyn("Ma50D",  Ma50Enabled  && showMaD, _ma50D.Result.LastValue,  Pos(_ma50D.Result.LastValue),  Ma50Width,  "MA 50 D");
+            Dyn("Ma50W",  Ma50Enabled  && showMaW, _ma50W.Result.LastValue,  Pos(_ma50W.Result.LastValue),  Ma50Width,  "MA 50 W");
+            Dyn("Ma200D", Ma200Enabled && showMaD, _ma200D.Result.LastValue, Pos(_ma200D.Result.LastValue), Ma200Width, "MA 200 D");
+            Dyn("Ma200W", Ma200Enabled && showMaW, _ma200W.Result.LastValue, Pos(_ma200W.Result.LastValue), Ma200Width, "MA 200 W");
+
+            // BB Magique (H1/H4/D/W) & Classique (H4/D/W) : niveau si bande plate-ou-fermeture.
+            Bb("BbmH1U", "BbmH1L", BbmEnabled && showBBmH1, _h1,     BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M H1");
+            Bb("BbmH4U", "BbmH4L", BbmEnabled && showBBmH4, _h4,     BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M H4");
+            Bb("BbmDU",  "BbmDL",  BbmEnabled && showBBmD,  _daily,  BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M D");
+            Bb("BbmWU",  "BbmWL",  BbmEnabled && showBBmW,  _weekly, BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M W");
+            Bb("BbcH4U", "BbcH4L", BbcEnabled && showBBcH4, _h4,     BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB H4");
+            Bb("BbcDU",  "BbcDL",  BbcEnabled && showBBcD,  _daily,  BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB D");
+            Bb("BbcWU",  "BbcWL",  BbcEnabled && showBBcW,  _weekly, BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB W");
         }
 
         /// <summary>
@@ -216,6 +312,17 @@ namespace _2Ai.Indicators.Levels
             double v = ok ? price : double.NaN;
             Draw.DrawLevel(Chart, "Lvl_" + id, start ?? Bars.OpenTimes.LastValue, end ?? Bars.OpenTimes.LastValue,
                 v, color, width, style, label, ShowLabels);
+        }
+
+        /// <summary>
+        /// Niveau dynamique (Supertrend / BB / MA) : ligne horizontale solide de
+        /// <paramref name="start"/> à <paramref name="end"/>. Désactivé ou NaN → retiré.
+        /// </summary>
+        private void DrawDynamic(string id, bool show, double value, Color color, int width,
+            DateTime start, DateTime end, string label)
+        {
+            double v = (show && !double.IsNaN(value)) ? value : double.NaN;
+            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, LineStyle.Solid, label, ShowLabels);
         }
     }
 }
