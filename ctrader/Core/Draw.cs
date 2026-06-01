@@ -66,7 +66,8 @@ namespace _2Ai.Indicators.Core
         /// </summary>
         public static void DrawLevel(Chart chart, string name,
             System.DateTime startTime, System.DateTime endTime, double price,
-            Color color, int thickness, LineStyle style, string label, bool showLabel)
+            Color color, int thickness, LineStyle style, string label, bool showLabel,
+            System.DateTime labelTime)
         {
             if (double.IsNaN(price))
             {
@@ -77,9 +78,11 @@ namespace _2Ai.Indicators.Core
 
             chart.DrawTrendLine(name, startTime, price, endTime, price, color, thickness, style);
 
+            // Label à labelTime, distinct de la fin de ligne : permet d'arrêter la ligne avant le
+            // label pour éviter le chevauchement (HTF), ou de coller le label à la fin (sessions).
             if (showLabel && !string.IsNullOrEmpty(label))
             {
-                var txt = chart.DrawText(name + "_lbl", label, endTime, price, color);
+                var txt = chart.DrawText(name + "_lbl", label, labelTime, price, color);
                 txt.VerticalAlignment = VerticalAlignment.Center;
                 txt.HorizontalAlignment = HorizontalAlignment.Right;
             }

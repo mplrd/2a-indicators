@@ -177,6 +177,7 @@ namespace _2Ai.Indicators.Levels
         private int _ipaPrevCount;
         private GapTracker _gapTracker;
         private int _gapPrevCount;
+        private double _barSec;  // durée d'une barre (s), pour décaler les labels HTF
 
         protected override void Initialize()
         {
@@ -225,7 +226,14 @@ namespace _2Ai.Indicators.Levels
             if (!IsLastBar) return;
 
             var now = Bars.OpenTimes[index];
-            double tfSec = index > 0 ? (Bars.OpenTimes[index] - Bars.OpenTimes[index - 1]).TotalSeconds : 0;
+            // Durée d'une barre = plus petit écart sur les ~10 dernières barres (robuste aux
+            // week-ends/fériés qui gonflent le dernier écart — ex. lundi−vendredi en Daily).
+            double tfSec = 0;
+            for (int k = 1; k <= 10 && index - k >= 0; k++)
+            {
+                double s = (Bars.OpenTimes[index - k + 1] - Bars.OpenTimes[index - k]).TotalSeconds;
+                if (s > 0 && (tfSec == 0 || s < tfSec)) tfSec = s;
+            }
 
             // Filtres TF : un niveau s'affiche si la TF courante <= période du niveau.
             bool showDaily   = tfSec <= 86400;       // <= D
@@ -238,26 +246,33 @@ namespace _2Ai.Indicators.Levels
             bool showBBmH1 = tfSec < 3600, showBBmH4 = tfSec < 14400, showBBmD = tfSec < 86400, showBBmW = tfSec < 604800;
             bool showBBcH4 = tfSec < 14400, showBBcD = tfSec < 86400, showBBcW = tfSec < 604800;
 
-            // ATH (toujours TF-allowed).
-            DrawHtf("ATH", AthEnabled, _ath.Value, _ath.Time ?? now, now, AthColor, AthWidth, LineStyle.Lines, "ATH", true);
+            // Fin "extend.right" : on prolonge loin dans le futur (cAlgo n'a pas d'extension
+            // droite native sur un segment ancré à gauche). ~200 barres suffit à dépasser le bord.
+            _barSec = tfSec > 0 ? tfSec : 86400;
+            var futureEnd = now.AddSeconds(_barSec * 200);  // gaps / IPA (sans label) : loin à droite
+            var rightEnd = now.AddSeconds(_barSec * 5);     // niveaux à label : courante + 5 barres
+            var chartStart = Bars.OpenTimes[0];             // ancrage gauche des dynamiques
+
+            // ATH + previous : de la bougie d'origine → courante +5, label au bout.
+            DrawHtf("ATH", AthEnabled, _ath.Value, _ath.Time ?? now, rightEnd, AthColor, AthWidth, LineStyle.Lines, "ATH", true);
 
             // PDH / PDL.
             var (pdH, pdL) = CoreLevels.PreviousPeriodHL(_daily, now);
             var pdStart = CoreLevels.PreviousPeriodStartUtc(_daily, now) ?? now;
-            DrawHtf("PDH", DailyEnabled && showDaily, pdH, pdStart, now, HtfColor, DailyWidth, LineStyle.Lines, "PDH", true);
-            DrawHtf("PDL", DailyEnabled && showDaily, pdL, pdStart, now, HtfColor, DailyWidth, LineStyle.Lines, "PDL", false);
+            DrawHtf("PDH", DailyEnabled && showDaily, pdH, pdStart, rightEnd, HtfColor, DailyWidth, LineStyle.Lines, "PDH", true);
+            DrawHtf("PDL", DailyEnabled && showDaily, pdL, pdStart, rightEnd, HtfColor, DailyWidth, LineStyle.Lines, "PDL", false);
 
             // PWH / PWL.
             var (pwH, pwL) = CoreLevels.PreviousPeriodHL(_weekly, now);
             var pwStart = CoreLevels.PreviousPeriodStartUtc(_weekly, now) ?? now;
-            DrawHtf("PWH", WeeklyEnabled && showWeekly, pwH, pwStart, now, HtfColor, WeeklyWidth, LineStyle.Solid, "PWH", true);
-            DrawHtf("PWL", WeeklyEnabled && showWeekly, pwL, pwStart, now, HtfColor, WeeklyWidth, LineStyle.Solid, "PWL", false);
+            DrawHtf("PWH", WeeklyEnabled && showWeekly, pwH, pwStart, rightEnd, HtfColor, WeeklyWidth, LineStyle.Solid, "PWH", true);
+            DrawHtf("PWL", WeeklyEnabled && showWeekly, pwL, pwStart, rightEnd, HtfColor, WeeklyWidth, LineStyle.Solid, "PWL", false);
 
             // PMH / PML.
             var (pmH, pmL) = CoreLevels.PreviousPeriodHL(_monthly, now);
             var pmStart = CoreLevels.PreviousPeriodStartUtc(_monthly, now) ?? now;
-            DrawHtf("PMH", MonthlyEnabled && showMonthly, pmH, pmStart, now, HtfColor, MonthlyWidth, LineStyle.Solid, "PMH", true);
-            DrawHtf("PML", MonthlyEnabled && showMonthly, pmL, pmStart, now, HtfColor, MonthlyWidth, LineStyle.Solid, "PML", false);
+            DrawHtf("PMH", MonthlyEnabled && showMonthly, pmH, pmStart, rightEnd, HtfColor, MonthlyWidth, LineStyle.Solid, "PMH", true);
+            DrawHtf("PML", MonthlyEnabled && showMonthly, pmL, pmStart, rightEnd, HtfColor, MonthlyWidth, LineStyle.Solid, "PML", false);
 
             // --- Intraday (strict < H1) ---
             // Sessions H/L : bornées à [start, end] (figées dès le début de session côté tracker).
@@ -269,18 +284,18 @@ namespace _2Ai.Indicators.Levels
             DrawSession("UsL",    UsEnabled    && showIntraday && _us.SeenToday,    _us.Low,     _us.StartUtc,    _us.EndUtc,    UsColor,    UsWidth,    LineStyle.Lines, "US L");
 
             // Opens : ligne ongoing (start = open de session → maintenant), pointillé. Off par défaut.
-            DrawSession("OpenFuture", OpenFutureEnabled && showIntraday && _futureOpen.SeenToday, _futureOpen.Price, _futureOpen.TimeUtc, now, HtfColor, 1, LineStyle.Dots, "Open Future");
-            DrawSession("OpenEU",     OpenEuEnabled     && showIntraday && _euOpen.SeenToday,     _euOpen.Price,     _euOpen.TimeUtc,     now, EuColor,  1, LineStyle.Dots, "Open EU");
-            DrawSession("OpenUS",     OpenUsEnabled     && showIntraday && _usOpen.SeenToday,     _usOpen.Price,     _usOpen.TimeUtc,     now, UsColor,  1, LineStyle.Dots, "Open US");
+            DrawSession("OpenFuture", OpenFutureEnabled && showIntraday && _futureOpen.SeenToday, _futureOpen.Price, _futureOpen.TimeUtc, rightEnd, HtfColor, 1, LineStyle.Dots, "Open Future");
+            DrawSession("OpenEU",     OpenEuEnabled     && showIntraday && _euOpen.SeenToday,     _euOpen.Price,     _euOpen.TimeUtc,     rightEnd, EuColor,  1, LineStyle.Dots, "Open EU");
+            DrawSession("OpenUS",     OpenUsEnabled     && showIntraday && _usOpen.SeenToday,     _usOpen.Price,     _usOpen.TimeUtc,     rightEnd, UsColor,  1, LineStyle.Dots, "Open US");
 
             // Open Range : H/L figés après 60 min, ligne ongoing toute la journée chart.
-            DrawSession("OrH", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.High, _or.StartUtc, now, OrColor, OrWidth, LineStyle.Dots, "OR H");
-            DrawSession("OrL", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.Low,  _or.StartUtc, now, OrColor, OrWidth, LineStyle.Dots, "OR L");
+            DrawSession("OrH", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.High, _or.StartUtc, rightEnd, OrColor, OrWidth, LineStyle.Dots, "OR H");
+            DrawSession("OrL", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.Low,  _or.StartUtc, rightEnd, OrColor, OrWidth, LineStyle.Dots, "OR L");
 
             // --- Niveaux dynamiques (Supertrend / BB / MA) — ligne horizontale dynStart→now ---
             double close = Bars.ClosePrices[index];
             void Dyn(string id, bool show, double value, Color color, int width, string label)
-                => DrawDynamic(id, show, value, color, width, label);
+                => DrawDynamic(id, show, value, color, width, label, chartStart, rightEnd);
             Color Pos(double v) => v > close ? DynBear : DynBull;  // au-dessus du prix → bear
             void Bb(string idU, string idL, bool show, Bars bars, int length, double mi, double mo, int width, string lbl)
             {
@@ -326,7 +341,7 @@ namespace _2Ai.Indicators.Levels
                 if (IpaEnabled && ipa.Broken && ipa.Bar >= 0 && ipa.Bar < Bars.Count)
                 {
                     var col = ipa.Price > close ? IpaBear : IpaBull;
-                    Draw.DrawLevel(Chart, nm, Bars.OpenTimes[ipa.Bar], now, ipa.Price, col, IpaWidth, LineStyle.Dots, "", false);
+                    Draw.DrawLevel(Chart, nm, Bars.OpenTimes[ipa.Bar], futureEnd, ipa.Price, col, IpaWidth, LineStyle.Dots, "", false, futureEnd);
                 }
                 else
                 {
@@ -346,7 +361,7 @@ namespace _2Ai.Indicators.Levels
                 var g = _gapTracker.Gaps[i];
                 string nm = "Gap_" + i;
                 if (GapsEnabled && g.LeftBarIndex >= 0 && g.LeftBarIndex < Bars.Count)
-                    Draw.DrawGapBox(Chart, nm, Bars.OpenTimes[g.LeftBarIndex], now, g.Top, g.Bottom, GapsColor, 85);
+                    Draw.DrawGapBox(Chart, nm, Bars.OpenTimes[g.LeftBarIndex], futureEnd, g.Top, g.Bottom, GapsColor, 85);
                 else
                     Chart.RemoveObject(nm);
             }
@@ -363,7 +378,7 @@ namespace _2Ai.Indicators.Levels
             Color color, int width, LineStyle style, string label, bool _)
         {
             double v = enabled ? price : double.NaN;
-            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, style, label, ShowLabels);
+            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, style, label, ShowLabels, end);
         }
 
         /// <summary>
@@ -375,18 +390,21 @@ namespace _2Ai.Indicators.Levels
         {
             bool ok = enabled && start.HasValue && end.HasValue;
             double v = ok ? price : double.NaN;
-            Draw.DrawLevel(Chart, "Lvl_" + id, start ?? Bars.OpenTimes.LastValue, end ?? Bars.OpenTimes.LastValue,
-                v, color, width, style, label, ShowLabels);
+            var e = end ?? Bars.OpenTimes.LastValue;
+            Draw.DrawLevel(Chart, "Lvl_" + id, start ?? Bars.OpenTimes.LastValue, e,
+                v, color, width, style, label, ShowLabels, e);
         }
 
         /// <summary>
         /// Niveau dynamique (Supertrend / BB / MA) : ligne horizontale solide de
         /// <paramref name="start"/> à <paramref name="end"/>. Désactivé ou NaN → retiré.
         /// </summary>
-        private void DrawDynamic(string id, bool show, double value, Color color, int width, string label)
+        private void DrawDynamic(string id, bool show, double value, Color color, int width, string label,
+            DateTime start, DateTime end)
         {
             double v = (show && !double.IsNaN(value)) ? value : double.NaN;
-            Draw.DrawHorizontalLevel(Chart, "Lvl_" + id, v, color, width, LineStyle.Solid, label, ShowLabels, Bars.OpenTimes.LastValue);
+            // Étend à gauche (chartStart) jusqu'à courante +5 (end), label au bout.
+            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, LineStyle.Solid, label, ShowLabels, end);
         }
     }
 }
