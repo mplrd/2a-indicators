@@ -100,6 +100,16 @@ namespace _2Ai.Indicators.Levels
         [Parameter("MA 200 width", DefaultValue = 2, MinValue = 1, MaxValue = 5, Group = "Niveaux dynamiques")]
         public int Ma200Width { get; set; }
 
+        // === Structure de marché (IPA) ===
+        [Parameter("IPA", DefaultValue = true, Group = "Structure de marché")]
+        public bool IpaEnabled { get; set; }
+        [Parameter("IPA width", DefaultValue = 2, MinValue = 1, MaxValue = 5, Group = "Structure de marché")]
+        public int IpaWidth { get; set; }
+        [Parameter("Pivot IPA", DefaultValue = 3, MinValue = 1, MaxValue = 50, Group = "Paramètres globaux")]
+        public int IpaPivotN { get; set; }
+        [Parameter("Max IPA", DefaultValue = 25, MinValue = 1, MaxValue = 200, Group = "Paramètres globaux")]
+        public int IpaMaxN { get; set; }
+
         // === Paramètres des Sessions (heures HHMM-HHMM + TZ IANA) ===
         [Parameter("Asiatique", DefaultValue = "0800-1400", Group = "Paramètres des Sessions")]
         public string AsianSession { get; set; }
@@ -136,6 +146,8 @@ namespace _2Ai.Indicators.Levels
         // Niveaux dynamiques : couleurs bull/bear partagées (ST par direction ; BB/MA par position).
         private static readonly Color DynBull = Color.Green;
         private static readonly Color DynBear = Color.Red;
+        private static readonly Color IpaBull = Color.Blue;    // support
+        private static readonly Color IpaBear = Color.Orange;  // résistance
         // Defaults projet (hardcodés comme dans Layout) : ST ATR/factor, BB longueurs/mult, flat.
         private const int    StAtrPeriod = 10;
         private const double StFactor    = 3.0;
@@ -154,6 +166,9 @@ namespace _2Ai.Indicators.Levels
         // ATR (Supertrend) et MA sur barres HTF.
         private cAlgo.API.Indicators.AverageTrueRange _atrD, _atrW;
         private cAlgo.API.Indicators.SimpleMovingAverage _ma50D, _ma50W, _ma200D, _ma200W;
+        // Structure de marché (IPA).
+        private MarketStructure _structure;
+        private int _ipaPrevCount;
 
         protected override void Initialize()
         {
@@ -171,6 +186,8 @@ namespace _2Ai.Indicators.Levels
             _ma50W  = Indicators.SimpleMovingAverage(_weekly.ClosePrices, 50);
             _ma200D = Indicators.SimpleMovingAverage(_daily.ClosePrices,  200);
             _ma200W = Indicators.SimpleMovingAverage(_weekly.ClosePrices, 200);
+
+            _structure = new MarketStructure(IpaPivotN, IpaMaxN);
 
             _asian = new SessionRange(AsianSession, AsianTz, ChartTz);
             _eu    = new SessionRange(EuSession,    EuTz,    ChartTz);
@@ -193,6 +210,7 @@ namespace _2Ai.Indicators.Levels
             _asian.Update(t, hi, lo); _eu.Update(t, hi, lo); _us.Update(t, hi, lo);
             _asianOpen.Update(t, op); _euOpen.Update(t, op); _usOpen.Update(t, op); _futureOpen.Update(t, op);
             _or.Update(t, hi, lo);
+            _structure.Update(Bars.HighPrices, Bars.LowPrices, Bars.ClosePrices, index);
 
             if (!IsLastBar) return;
 
@@ -287,6 +305,29 @@ namespace _2Ai.Indicators.Levels
             Bb("BbcH4U", "BbcH4L", BbcEnabled && showBBcH4, _h4,     BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB H4");
             Bb("BbcDU",  "BbcDL",  BbcEnabled && showBBcD,  _daily,  BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB D");
             Bb("BbcWU",  "BbcWL",  BbcEnabled && showBBcW,  _weekly, BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB W");
+
+            // --- IPA (structure de marché) : ray ancré au pivot, couleur par position vs prix.
+            // Seuls les IPA cassés se dessinent. Nettoyage des objets au-delà du compte courant.
+            int ipaN = _structure.Ipas.Count;
+            for (int i = 0; i < ipaN; i++)
+            {
+                var ipa = _structure.Ipas[i];
+                string nm = "Lvl_Ipa_" + i;
+                if (IpaEnabled && ipa.Broken && ipa.Bar >= 0 && ipa.Bar < Bars.Count)
+                {
+                    var col = ipa.Price > close ? IpaBear : IpaBull;
+                    Draw.DrawLevel(Chart, nm, Bars.OpenTimes[ipa.Bar], now, ipa.Price, col, IpaWidth, LineStyle.Dots, "", false);
+                }
+                else
+                {
+                    Chart.RemoveObject(nm); Chart.RemoveObject(nm + "_lbl");
+                }
+            }
+            for (int i = ipaN; i < _ipaPrevCount; i++)
+            {
+                Chart.RemoveObject("Lvl_Ipa_" + i); Chart.RemoveObject("Lvl_Ipa_" + i + "_lbl");
+            }
+            _ipaPrevCount = ipaN;
         }
 
         /// <summary>
