@@ -61,6 +61,16 @@ namespace _2Ai.Indicators.Core
         }
 
         /// <summary>
+        /// Tente de résoudre (et cacher) une TZ sans jeter. Permet à un consommateur de valider une
+        /// TZ saisie par l'utilisateur et de désactiver proprement la feature au lieu de crasher.
+        /// </summary>
+        public static bool TryWarmTz(string tz)
+        {
+            try { Tz(tz); return true; }
+            catch { return false; }
+        }
+
+        /// <summary>
         /// Convertit un instant UTC vers la TZ IANA donnée (DST géré par le nom IANA).
         /// </summary>
         public static DateTime InTz(DateTime utc, string tz)

@@ -72,6 +72,27 @@ namespace _2Ai.Indicators.Levels
         [Parameter("Open US", DefaultValue = false, Group = "Niveaux Intraday")]
         public bool OpenUsEnabled { get; set; }
 
+        // === Paramètres des Sessions (heures HHMM-HHMM + TZ IANA) ===
+        [Parameter("Asiatique", DefaultValue = "0800-1400", Group = "Paramètres des Sessions")]
+        public string AsianSession { get; set; }
+        [Parameter("Asiatique TZ", DefaultValue = "Asia/Tokyo", Group = "Paramètres des Sessions")]
+        public string AsianTz { get; set; }
+
+        [Parameter("Européenne", DefaultValue = "0900-1400", Group = "Paramètres des Sessions")]
+        public string EuSession { get; set; }
+        [Parameter("Européenne TZ", DefaultValue = "Europe/Paris", Group = "Paramètres des Sessions")]
+        public string EuTz { get; set; }
+
+        [Parameter("Américaine", DefaultValue = "0930-1600", Group = "Paramètres des Sessions")]
+        public string UsSession { get; set; }
+        [Parameter("Américaine TZ", DefaultValue = "America/New_York", Group = "Paramètres des Sessions")]
+        public string UsTz { get; set; }
+
+        [Parameter("Future open", DefaultValue = "0800-0900", Group = "Paramètres des Sessions")]
+        public string FutureSession { get; set; }
+        [Parameter("Future TZ", DefaultValue = "Europe/Paris", Group = "Paramètres des Sessions")]
+        public string FutureTz { get; set; }
+
         [Parameter("Afficher les labels", DefaultValue = true, Group = "Paramètres globaux")]
         public bool ShowLabels { get; set; }
 
@@ -100,14 +121,14 @@ namespace _2Ai.Indicators.Levels
             _monthly = MarketData.GetBars(TimeFrame.Monthly);
             _ath     = new AllTimeHigh();
 
-            _asian = new SessionRange("0800-1400", "Asia/Tokyo",       ChartTz);
-            _eu    = new SessionRange("0900-1400", "Europe/Paris",     ChartTz);
-            _us    = new SessionRange("0930-1600", "America/New_York", ChartTz);
+            _asian = new SessionRange(AsianSession, AsianTz, ChartTz);
+            _eu    = new SessionRange(EuSession,    EuTz,    ChartTz);
+            _us    = new SessionRange(UsSession,    UsTz,    ChartTz);
 
-            _asianOpen  = new SessionOpen("0800-1400", "Asia/Tokyo",       ChartTz);
-            _euOpen     = new SessionOpen("0900-1400", "Europe/Paris",     ChartTz);
-            _usOpen     = new SessionOpen("0930-1600", "America/New_York", ChartTz);
-            _futureOpen = new SessionOpen("0800-0900", "Europe/Paris",     ChartTz);
+            _asianOpen  = new SessionOpen(AsianSession,  AsianTz,  ChartTz);
+            _euOpen     = new SessionOpen(EuSession,     EuTz,     ChartTz);
+            _usOpen     = new SessionOpen(UsSession,     UsTz,     ChartTz);
+            _futureOpen = new SessionOpen(FutureSession, FutureTz, ChartTz);
 
             _or = new OpenRange(ChartTz);
         }

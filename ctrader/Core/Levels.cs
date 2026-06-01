@@ -99,6 +99,7 @@ namespace _2Ai.Indicators.Core
     {
         private readonly string _session, _sessionTz, _chartTz;
         private readonly int _endMin;
+        private readonly bool _valid;
         private int _lastDate = -1;
         private bool _wasInSession;
 
@@ -114,11 +115,14 @@ namespace _2Ai.Indicators.Core
             _session = sessionStr;
             _sessionTz = sessionTz;
             _chartTz = chartTz;
-            Time.ParseSession(sessionStr, out _, out _endMin);
+            bool ok = Time.TryWarmTz(sessionTz) && Time.TryWarmTz(chartTz);
+            try { Time.ParseSession(sessionStr, out _, out _endMin); } catch { ok = false; }
+            _valid = ok;
         }
 
         public void Update(DateTime barTimeUtc, double high, double low)
         {
+            if (!_valid) return;
             int date = Time.DateInTz(barTimeUtc, _chartTz);
             // Pas de reset sur la toute première barre (parité Pine : ta.change = na au 1er bar).
             if (_lastDate != -1 && date != _lastDate)
@@ -154,6 +158,7 @@ namespace _2Ai.Indicators.Core
     public class SessionOpen
     {
         private readonly string _session, _sessionTz, _chartTz;
+        private readonly bool _valid;
         private int _lastDate = -1;
         private bool _wasInSession;
 
@@ -166,10 +171,14 @@ namespace _2Ai.Indicators.Core
             _session = sessionStr;
             _sessionTz = sessionTz;
             _chartTz = chartTz;
+            bool ok = Time.TryWarmTz(sessionTz) && Time.TryWarmTz(chartTz);
+            try { Time.ParseSession(sessionStr, out _, out _); } catch { ok = false; }
+            _valid = ok;
         }
 
         public void Update(DateTime barTimeUtc, double open)
         {
+            if (!_valid) return;
             int date = Time.DateInTz(barTimeUtc, _chartTz);
             if (_lastDate != -1 && date != _lastDate)
             {
@@ -197,6 +206,7 @@ namespace _2Ai.Indicators.Core
     public class OpenRange
     {
         private readonly string _tz;
+        private readonly bool _valid;
         private int _lastDate = -1;
 
         public double High { get; private set; } = double.NaN;
@@ -205,10 +215,11 @@ namespace _2Ai.Indicators.Core
         public DateTime? EndUtc { get; private set; }
         public bool SeenToday { get; private set; }
 
-        public OpenRange(string tz) { _tz = tz; }
+        public OpenRange(string tz) { _tz = tz; _valid = Time.TryWarmTz(tz); }
 
         public void Update(DateTime barTimeUtc, double high, double low)
         {
+            if (!_valid) return;
             int date = Time.DateInTz(barTimeUtc, _tz);
             bool isNewDay = _lastDate != -1 && date != _lastDate;
             _lastDate = date;
