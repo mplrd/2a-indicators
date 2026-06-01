@@ -142,5 +142,30 @@ namespace _2Ai.Indicators.Core
             var rect = chart.DrawRectangle(name, startTime, top, endTime, bottom, WithAlpha(color, alpha));
             rect.IsFilled = true;
         }
+
+        /// <summary>
+        /// Dessine une zone S/D ou FVG : un rectangle de remplissage (faible, <paramref name="fillAlpha"/>)
+        /// + une bordure plus marquée (<paramref name="borderAlpha"/>, épaisseur/style donnés) si
+        /// <paramref name="borderWidth"/> &gt; 0. Deux objets (<c>name</c>+"_f"/"_b") car cAlgo n'a
+        /// pas d'alpha bordure/fond distincts sur un seul rectangle. Équiv Pine <c>drawZoneBox</c>.
+        /// </summary>
+        public static void DrawZoneBox(Chart chart, string name,
+            System.DateTime leftTime, System.DateTime rightTime, double top, double bottom,
+            Color color, int borderWidth, LineStyle borderStyle, int fillAlpha, int borderAlpha)
+        {
+            var fill = chart.DrawRectangle(name + "_f", leftTime, top, rightTime, bottom, WithAlpha(color, fillAlpha));
+            fill.IsFilled = true;
+
+            if (borderWidth > 0)
+            {
+                var border = chart.DrawRectangle(name + "_b", leftTime, top, rightTime, bottom,
+                    WithAlpha(color, borderAlpha), borderWidth, borderStyle);
+                border.IsFilled = false;
+            }
+            else
+            {
+                chart.RemoveObject(name + "_b");
+            }
+        }
     }
 }
