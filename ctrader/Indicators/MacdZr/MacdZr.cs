@@ -11,6 +11,9 @@ namespace _2Ai.Indicators.MacdZr
     /// <c>[Output]</c>, donc histogramme et signal sont dédoublés (up/down) via le NaN-trick.</para>
     /// </summary>
     [Indicator(IsOverlay = false, AccessRights = AccessRights.None)]
+    // Nuage MACD↔Signal : le cloud bicolore colore selon la série du dessus. hist>0 ⟺ MACD>Signal
+    // → FirstColor (vert) ; hist<0 → SecondColor (rouge). Reproduit le fill() Pine sans toggle.
+    [Cloud("MACD ZR", "Signal", FirstColor = "#4CAF4F", SecondColor = "#FF5252", Opacity = 0.35)]
     public class MacdZr : Indicator
     {
         [Parameter("Source")]
@@ -45,6 +48,10 @@ namespace _2Ai.Indicators.MacdZr
         [Output("Signal Down", LineColor = "#FF5252", PlotType = PlotType.DiscontinuousLine)]
         public IndicatorDataSeries SignalDown { get; set; }
 
+        // Signal continu (transparent) : sert uniquement d'arête au cloud (les Up/Down ont des NaN).
+        [Output("Signal", LineColor = "Transparent", PlotType = PlotType.Line)]
+        public IndicatorDataSeries Signal { get; set; }
+
         [Output("MA Line", LineColor = "#527AFF", PlotType = PlotType.Line)]
         public IndicatorDataSeries MaLine { get; set; }
 
@@ -72,6 +79,7 @@ namespace _2Ai.Indicators.MacdZr
             MacdLine[index] = macd;
             SignalUp[index]   = up ? signal : double.NaN;
             SignalDown[index] = up ? double.NaN : signal;
+            Signal[index]   = signal;  // arête continue du cloud
             MaLine[index]   = average;
         }
     }
