@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using cAlgo.API;
 
 namespace _2Ai.Indicators.Core
 {
@@ -123,6 +124,22 @@ namespace _2Ai.Indicators.Core
             var local = InTz(utc, tz);
             var localTarget = new DateTime(local.Year, local.Month, local.Day, hour, minute, 0, DateTimeKind.Unspecified);
             return TimeZoneInfo.ConvertTimeToUtc(localTarget, Tz(tz));
+        }
+
+        /// <summary>
+        /// Durée d'une barre en secondes = plus PETIT écart positif sur les <paramref name="lookback"/>
+        /// dernières barres. Robuste aux week-ends/fériés qui gonflent le dernier écart (ex :
+        /// lundi−vendredi en Daily). Retourne <paramref name="fallback"/> si aucun écart valide.
+        /// </summary>
+        public static double BarSpanSeconds(TimeSeries openTimes, int index, int lookback, double fallback)
+        {
+            double span = 0;
+            for (int k = 1; k <= lookback && index - k >= 0; k++)
+            {
+                double s = (openTimes[index - k + 1] - openTimes[index - k]).TotalSeconds;
+                if (s > 0 && (span == 0 || s < span)) span = s;
+            }
+            return span > 0 ? span : fallback;
         }
 
         /// <summary>

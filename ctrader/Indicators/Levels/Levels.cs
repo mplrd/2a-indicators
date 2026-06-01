@@ -2,6 +2,7 @@ using System;
 using cAlgo.API;
 using _2Ai.Indicators.Core;
 using CoreLevels = _2Ai.Indicators.Core.Levels;
+using CoreTime = _2Ai.Indicators.Core.Time;  // alias : Indicator.Time (cAlgo) masque la classe Core.Time
 
 namespace _2Ai.Indicators.Levels
 {
@@ -226,14 +227,7 @@ namespace _2Ai.Indicators.Levels
             if (!IsLastBar) return;
 
             var now = Bars.OpenTimes[index];
-            // Durée d'une barre = plus petit écart sur les ~10 dernières barres (robuste aux
-            // week-ends/fériés qui gonflent le dernier écart — ex. lundi−vendredi en Daily).
-            double tfSec = 0;
-            for (int k = 1; k <= 10 && index - k >= 0; k++)
-            {
-                double s = (Bars.OpenTimes[index - k + 1] - Bars.OpenTimes[index - k]).TotalSeconds;
-                if (s > 0 && (tfSec == 0 || s < tfSec)) tfSec = s;
-            }
+            double tfSec = CoreTime.BarSpanSeconds(Bars.OpenTimes, index, 10, 86400);
 
             // Filtres TF : un niveau s'affiche si la TF courante <= période du niveau.
             bool showDaily   = tfSec <= 86400;       // <= D
@@ -248,7 +242,7 @@ namespace _2Ai.Indicators.Levels
 
             // Fin "extend.right" : on prolonge loin dans le futur (cAlgo n'a pas d'extension
             // droite native sur un segment ancré à gauche). ~200 barres suffit à dépasser le bord.
-            _barSec = tfSec > 0 ? tfSec : 86400;
+            _barSec = tfSec;
             var futureEnd = now.AddSeconds(_barSec * 200);  // gaps / IPA (sans label) : loin à droite
             var rightEnd = now.AddSeconds(_barSec * 5);     // niveaux à label : courante + 5 barres
             var chartStart = Bars.OpenTimes[0];             // ancrage gauche des dynamiques
@@ -296,7 +290,7 @@ namespace _2Ai.Indicators.Levels
             double close = Bars.ClosePrices[index];
             void Dyn(string id, bool show, double value, Color color, int width, string label)
                 => DrawDynamic(id, show, value, color, width, label, chartStart, rightEnd);
-            Color Pos(double v) => v > close ? DynBear : DynBull;  // au-dessus du prix → bear
+            Color Pos(double v) => Draw.PositionColor(v, close, DynBull, DynBear);
             void Bb(string idU, string idL, bool show, Bars bars, int length, double mi, double mo, int width, string lbl)
             {
                 int li = bars.OpenTimes.GetIndexByTime(now);
@@ -340,7 +334,7 @@ namespace _2Ai.Indicators.Levels
                 string nm = "Lvl_Ipa_" + i;
                 if (IpaEnabled && ipa.Broken && ipa.Bar >= 0 && ipa.Bar < Bars.Count)
                 {
-                    var col = ipa.Price > close ? IpaBear : IpaBull;
+                    var col = Draw.PositionColor(ipa.Price, close, IpaBull, IpaBear);
                     Draw.DrawLevel(Chart, nm, Bars.OpenTimes[ipa.Bar], futureEnd, ipa.Price, col, IpaWidth, LineStyle.Dots, "", false, futureEnd);
                 }
                 else

@@ -25,6 +25,14 @@ namespace _2Ai.Indicators.Core
         }
 
         /// <summary>
+        /// Couleur d'un niveau dynamique selon sa position vs le prix : au-dessus → <paramref name="bearColor"/>
+        /// (résistance), au-dessous ou égal → <paramref name="bullColor"/> (support). Équivaut à la
+        /// logique de Pine <c>lib_draw.drawDynamicLevel</c>.
+        /// </summary>
+        public static Color PositionColor(double value, double price, Color bullColor, Color bearColor)
+            => value > price ? bearColor : bullColor;
+
+        /// <summary>
         /// Applique une transparence à une couleur. Convention Pine portée :
         /// <paramref name="alpha"/> de 0 (opaque) à 100 (invisible).
         /// </summary>
