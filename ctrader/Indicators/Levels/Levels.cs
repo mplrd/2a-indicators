@@ -110,6 +110,11 @@ namespace _2Ai.Indicators.Levels
         [Parameter("Max IPA", DefaultValue = 25, MinValue = 1, MaxValue = 200, Group = "Paramètres globaux")]
         public int IpaMaxN { get; set; }
 
+        [Parameter("Gaps", DefaultValue = true, Group = "Structure de marché")]
+        public bool GapsEnabled { get; set; }
+        [Parameter("Gaps lookback", DefaultValue = 50, MinValue = 10, MaxValue = 500, Group = "Structure de marché")]
+        public int GapsLookback { get; set; }
+
         // === Paramètres des Sessions (heures HHMM-HHMM + TZ IANA) ===
         [Parameter("Asiatique", DefaultValue = "0800-1400", Group = "Paramètres des Sessions")]
         public string AsianSession { get; set; }
@@ -148,6 +153,7 @@ namespace _2Ai.Indicators.Levels
         private static readonly Color DynBear = Color.Red;
         private static readonly Color IpaBull = Color.Blue;    // support
         private static readonly Color IpaBear = Color.Orange;  // résistance
+        private static readonly Color GapsColor = Color.FromHex("#CCCCCC");
         // Defaults projet (hardcodés comme dans Layout) : ST ATR/factor, BB longueurs/mult, flat.
         private const int    StAtrPeriod = 10;
         private const double StFactor    = 3.0;
@@ -166,9 +172,11 @@ namespace _2Ai.Indicators.Levels
         // ATR (Supertrend) et MA sur barres HTF.
         private cAlgo.API.Indicators.AverageTrueRange _atrD, _atrW;
         private cAlgo.API.Indicators.SimpleMovingAverage _ma50D, _ma50W, _ma200D, _ma200W;
-        // Structure de marché (IPA).
+        // Structure de marché (IPA) + Gaps.
         private MarketStructure _structure;
         private int _ipaPrevCount;
+        private GapTracker _gapTracker;
+        private int _gapPrevCount;
 
         protected override void Initialize()
         {
@@ -188,6 +196,7 @@ namespace _2Ai.Indicators.Levels
             _ma200W = Indicators.SimpleMovingAverage(_weekly.ClosePrices, 200);
 
             _structure = new MarketStructure(IpaPivotN, IpaMaxN);
+            _gapTracker = new GapTracker(GapsLookback);
 
             _asian = new SessionRange(AsianSession, AsianTz, ChartTz);
             _eu    = new SessionRange(EuSession,    EuTz,    ChartTz);
@@ -211,6 +220,7 @@ namespace _2Ai.Indicators.Levels
             _asianOpen.Update(t, op); _euOpen.Update(t, op); _usOpen.Update(t, op); _futureOpen.Update(t, op);
             _or.Update(t, hi, lo);
             _structure.Update(Bars.HighPrices, Bars.LowPrices, Bars.ClosePrices, index);
+            _gapTracker.Update(Bars, _daily, index);
 
             if (!IsLastBar) return;
 
@@ -328,6 +338,21 @@ namespace _2Ai.Indicators.Levels
                 Chart.RemoveObject("Lvl_Ipa_" + i); Chart.RemoveObject("Lvl_Ipa_" + i + "_lbl");
             }
             _ipaPrevCount = ipaN;
+
+            // --- Gaps (daily) : boxes de la barre-avant-gap jusqu'à maintenant. ---
+            int gapN = _gapTracker.Gaps.Count;
+            for (int i = 0; i < gapN; i++)
+            {
+                var g = _gapTracker.Gaps[i];
+                string nm = "Gap_" + i;
+                if (GapsEnabled && g.LeftBarIndex >= 0 && g.LeftBarIndex < Bars.Count)
+                    Draw.DrawGapBox(Chart, nm, Bars.OpenTimes[g.LeftBarIndex], now, g.Top, g.Bottom, GapsColor, 85);
+                else
+                    Chart.RemoveObject(nm);
+            }
+            for (int i = gapN; i < _gapPrevCount; i++)
+                Chart.RemoveObject("Gap_" + i);
+            _gapPrevCount = gapN;
         }
 
         /// <summary>

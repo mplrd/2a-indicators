@@ -117,5 +117,19 @@ namespace _2Ai.Indicators.Core
                 chart.RemoveObject(name + "_lbl");
             }
         }
+
+        /// <summary>
+        /// Dessine un gap sous forme de rectangle rempli de <paramref name="startTime"/> à
+        /// <paramref name="endTime"/>, entre <paramref name="top"/> et <paramref name="bottom"/>.
+        /// <paramref name="alpha"/> suit la convention Pine (0 opaque → 100 invisible).
+        /// Équivalent de Pine <c>drawGapBox</c>.
+        /// </summary>
+        public static void DrawGapBox(Chart chart, string name,
+            System.DateTime startTime, System.DateTime endTime, double top, double bottom,
+            Color color, int alpha)
+        {
+            var rect = chart.DrawRectangle(name, startTime, top, endTime, bottom, WithAlpha(color, alpha));
+            rect.IsFilled = true;
+        }
     }
 }
