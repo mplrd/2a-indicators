@@ -20,13 +20,43 @@ namespace _2Ai.Indicators.Core
         // FindSystemTimeZoneById est coûteux : on cache les TimeZoneInfo par ID IANA.
         private static readonly Dictionary<string, TimeZoneInfo> _tzCache = new Dictionary<string, TimeZoneInfo>();
 
+        // Le runtime cAlgo ne fournit PAS le mapping IANA (pas d'ICU actif) : FindSystemTimeZoneById
+        // jette sur un ID IANA, et TryConvertIanaIdToWindowsId échoue aussi (dépend d'ICU). On mappe
+        // donc explicitement nos zones vers leur ID Windows — résolu via le registre, sans ICU.
+        private static readonly Dictionary<string, string> _ianaToWindows = new Dictionary<string, string>
+        {
+            ["Europe/Paris"]      = "Romance Standard Time",
+            ["Europe/London"]     = "GMT Standard Time",
+            ["Asia/Tokyo"]        = "Tokyo Standard Time",
+            ["America/New_York"]  = "Eastern Standard Time",
+            ["America/Chicago"]   = "Central Standard Time",
+            ["Australia/Sydney"]  = "AUS Eastern Standard Time",
+            ["UTC"]               = "UTC",
+        };
+
         private static TimeZoneInfo Tz(string ianaId)
         {
-            if (!_tzCache.TryGetValue(ianaId, out var tz))
+            if (_tzCache.TryGetValue(ianaId, out var cached)) return cached;
+
+            TimeZoneInfo tz;
+            try
             {
+                // Runtime ICU-actif : l'ID IANA passe directement.
                 tz = TimeZoneInfo.FindSystemTimeZoneById(ianaId);
-                _tzCache[ianaId] = tz;
             }
+            catch (TimeZoneNotFoundException)
+            {
+                // Runtime sans ICU (cas cAlgo) : on résout via l'ID Windows.
+                string windowsId = null;
+                if (_ianaToWindows.TryGetValue(ianaId, out var mapped))
+                    windowsId = mapped;
+                else if (TimeZoneInfo.TryConvertIanaIdToWindowsId(ianaId, out var converted))
+                    windowsId = converted;
+
+                if (windowsId == null) throw;
+                tz = TimeZoneInfo.FindSystemTimeZoneById(windowsId);
+            }
+            _tzCache[ianaId] = tz;
             return tz;
         }
 
