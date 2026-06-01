@@ -81,19 +81,19 @@ namespace _2Ai.Indicators.Levels
 
             // PDH / PDL.
             var (pdH, pdL) = CoreLevels.PreviousPeriodHL(_daily, now);
-            var pdStart = CoreLevels.CurrentPeriodStartUtc(_daily, now) ?? now;
+            var pdStart = CoreLevels.PreviousPeriodStartUtc(_daily, now) ?? now;
             DrawHtf("PDH", DailyEnabled && showDaily, pdH, pdStart, now, HtfColor, DailyWidth, LineStyle.Lines, "PDH", true);
             DrawHtf("PDL", DailyEnabled && showDaily, pdL, pdStart, now, HtfColor, DailyWidth, LineStyle.Lines, "PDL", false);
 
             // PWH / PWL.
             var (pwH, pwL) = CoreLevels.PreviousPeriodHL(_weekly, now);
-            var pwStart = CoreLevels.CurrentPeriodStartUtc(_weekly, now) ?? now;
+            var pwStart = CoreLevels.PreviousPeriodStartUtc(_weekly, now) ?? now;
             DrawHtf("PWH", WeeklyEnabled && showWeekly, pwH, pwStart, now, HtfColor, WeeklyWidth, LineStyle.Solid, "PWH", true);
             DrawHtf("PWL", WeeklyEnabled && showWeekly, pwL, pwStart, now, HtfColor, WeeklyWidth, LineStyle.Solid, "PWL", false);
 
             // PMH / PML.
             var (pmH, pmL) = CoreLevels.PreviousPeriodHL(_monthly, now);
-            var pmStart = CoreLevels.CurrentPeriodStartUtc(_monthly, now) ?? now;
+            var pmStart = CoreLevels.PreviousPeriodStartUtc(_monthly, now) ?? now;
             DrawHtf("PMH", MonthlyEnabled && showMonthly, pmH, pmStart, now, HtfColor, MonthlyWidth, LineStyle.Solid, "PMH", true);
             DrawHtf("PML", MonthlyEnabled && showMonthly, pmL, pmStart, now, HtfColor, MonthlyWidth, LineStyle.Solid, "PML", false);
         }

@@ -41,16 +41,17 @@ namespace _2Ai.Indicators.Core
         }
 
         /// <summary>
-        /// Open time (UTC) du DÉBUT de la période courante du TF supérieur — point d'ancrage pour
-        /// tracer le niveau "période précédente" à travers la période courante. Équivaut, côté
-        /// dessin temporel cAlgo, à Pine <c>previousPeriodStartBar</c> / <c>previousPeriodStartTime</c>.
+        /// Open time (UTC) du DÉBUT de la période PRÉCÉDENTE du TF supérieur — point d'ancrage du
+        /// niveau dont on trace le H/L (ex : PDH ancré au début d'hier, étendu vers la droite).
+        /// Équivaut à Pine <c>previousPeriodStartBar</c> (qui renvoie <c>prevStart</c>, le début de
+        /// la période d'avant, et NON la période courante).
         /// </summary>
-        /// <returns>Open time de la barre HTF courante, ou <c>null</c> si introuvable.</returns>
-        public static DateTime? CurrentPeriodStartUtc(Bars htfBars, DateTime barTimeUtc)
+        /// <returns>Open time de la barre HTF précédente, ou <c>null</c> si pas assez d'historique.</returns>
+        public static DateTime? PreviousPeriodStartUtc(Bars htfBars, DateTime barTimeUtc)
         {
             int i = htfBars.OpenTimes.GetIndexByTime(barTimeUtc);
-            if (i < 0) return null;
-            return htfBars.OpenTimes[i];
+            if (i < 1) return null;
+            return htfBars.OpenTimes[i - 1];
         }
     }
 
