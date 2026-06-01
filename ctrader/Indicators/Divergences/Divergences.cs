@@ -58,9 +58,9 @@ namespace _2Ai.Indicators.Divergences
         public IndicatorDataSeries RsiUnder { get; set; }
         [Output("RSI MA", LineColor = "Blue", PlotType = PlotType.Line)]
         public IndicatorDataSeries RsiMa { get; set; }
-        [Output("RSI Bearish Divergence", LineColor = "#AA0000", PlotType = PlotType.Points, Thickness = 4)]
+        [Output("RSI Bearish Divergence", LineColor = "#AA0000", PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
         public IndicatorDataSeries RsiBearMark { get; set; }
-        [Output("RSI Bullish Divergence", LineColor = "#006403", PlotType = PlotType.Points, Thickness = 4)]
+        [Output("RSI Bullish Divergence", LineColor = "#006403", PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
         public IndicatorDataSeries RsiBullMark { get; set; }
 
         // Stoch K/D + marqueurs.
@@ -68,9 +68,9 @@ namespace _2Ai.Indicators.Divergences
         public IndicatorDataSeries StochK { get; set; }
         [Output("Stoch D", LineColor = "#673AB7", PlotType = PlotType.Line)]
         public IndicatorDataSeries StochD { get; set; }
-        [Output("Stoch Bearish Divergence", LineColor = "#FF3535", PlotType = PlotType.Points, Thickness = 3)]
+        [Output("Stoch Bearish Divergence", LineColor = "#FF3535", PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
         public IndicatorDataSeries StochBearMark { get; set; }
-        [Output("Stoch Bullish Divergence", LineColor = "#44B847", PlotType = PlotType.Points, Thickness = 3)]
+        [Output("Stoch Bullish Divergence", LineColor = "#44B847", PlotType = PlotType.DiscontinuousLine, Thickness = 2)]
         public IndicatorDataSeries StochBullMark { get; set; }
 
         private RelativeStrengthIndex _rsi;
@@ -92,20 +92,42 @@ namespace _2Ai.Indicators.Divergences
         {
             LastTopOsc = CreateDataSeries(), LastTopPrice = CreateDataSeries(),
             LastBotOsc = CreateDataSeries(), LastBotPrice = CreateDataSeries(),
+            LastTopBar = CreateDataSeries(), LastBotBar = CreateDataSeries(),
         };
+
+        // Couleur RSI à l'index j : 0 neutre / 1 overbought / 2 oversold (confirmé sur 2 barres).
+        private int RsiColorAt(int j)
+        {
+            if (j < 1) return 0;
+            double v = _rsi.Result[j], p = _rsi.Result[j - 1];
+            bool u = (v < LevelOversold2 && p <= LevelOversold2) || (v < LevelOversold1 && p <= LevelOversold1);
+            bool o = (v > LevelOverbought2 && p >= LevelOverbought2) || (v > LevelOverbought1 && p >= LevelOverbought1);
+            return u ? 2 : o ? 1 : 0;
+        }
+
+        // Trace une ligne droite (interpolée) du pivot barA au pivot barB sur une sortie
+        // DiscontinuousLine : les barres consécutives se relient, et c'est discontinu entre divergences.
+        private void DrawDivLine(IndicatorDataSeries outp, DataSeries osc, int barA, int barB)
+        {
+            if (barA < 0 || barB <= barA) return;
+            double va = osc[barA], vb = osc[barB];
+            for (int j = barA; j <= barB; j++)
+                outp[j] = va + (vb - va) * (double)(j - barA) / (barB - barA);
+        }
 
         public override void Calculate(int index)
         {
             double rsi = _rsi.Result[index];
 
-            // --- RSI couleur (neutre / overbought / oversold), confirmé sur 2 barres ---
-            double rsiPrev = index >= 1 ? _rsi.Result[index - 1] : double.NaN;
-            bool under = (rsi < LevelOversold2 && rsiPrev <= LevelOversold2) || (rsi < LevelOversold1 && rsiPrev <= LevelOversold1);
-            bool over  = (rsi > LevelOverbought2 && rsiPrev >= LevelOverbought2) || (rsi > LevelOverbought1 && rsiPrev >= LevelOverbought1);
-
-            RsiUnder[index]   = (RsiShow && under) ? rsi : double.NaN;
-            RsiOver[index]    = (RsiShow && !under && over) ? rsi : double.NaN;
-            RsiNeutral[index] = (RsiShow && !under && !over) ? rsi : double.NaN;
+            // --- RSI couleur (0 neutre / 1 overbought / 2 oversold), confirmé sur 2 barres ---
+            // Pour une ligne continue malgré le dédoublement : chaque série porte aussi le point de
+            // la barre précédente si sa couleur y était → recouvrement d'1 barre aux transitions
+            // (sinon DiscontinuousLine ne relie pas les segments d'1 barre → trous).
+            int c  = RsiColorAt(index);
+            int cp = index >= 1 ? RsiColorAt(index - 1) : c;
+            RsiNeutral[index] = (RsiShow && (c == 0 || cp == 0)) ? rsi : double.NaN;
+            RsiOver[index]    = (RsiShow && (c == 1 || cp == 1)) ? rsi : double.NaN;
+            RsiUnder[index]   = (RsiShow && (c == 2 || cp == 2)) ? rsi : double.NaN;
             RsiMa[index]      = (RsiShow && RsiShowMa) ? _rsiMa.Result[index] : double.NaN;
 
             // --- Stochastic RSI (toujours calculé ; affiché si StochShow) ---
@@ -113,26 +135,21 @@ namespace _2Ai.Indicators.Divergences
             StochK[index] = StochShow ? k : double.NaN;
             StochD[index] = StochShow ? d : double.NaN;
 
-            // --- Divergences RSI (avec bornes OB/OS) ---
-            var (rTop, rBot, rBearReg, rBullReg, rBearHid, rBullHid) =
+            // --- Divergences RSI (avec bornes OB/OS) — ligne reliant pivot précédent → pivot courant ---
+            var (rTop, rBot, rBearReg, rBullReg, rBearHid, rBullHid, rPrevTopBar, rPrevBotBar) =
                 Divergence.Step(_rsi.Result, Bars.HighPrices, Bars.LowPrices, index, LevelOverbought1, LevelOversold1, true, _memRsi);
-            bool rBear = (RsiShowDiv && rBearReg) || (RsiShowHiddenDiv && rBearHid);
-            bool rBull = (RsiShowDiv && rBullReg) || (RsiShowHiddenDiv && rBullHid);
+            if (RsiShow && rTop && ((RsiShowDiv && rBearReg) || (RsiShowHiddenDiv && rBearHid)))
+                DrawDivLine(RsiBearMark, _rsi.Result, rPrevTopBar, index - 2);
+            if (RsiShow && rBot && ((RsiShowDiv && rBullReg) || (RsiShowHiddenDiv && rBullHid)))
+                DrawDivLine(RsiBullMark, _rsi.Result, rPrevBotBar, index - 2);
 
             // --- Divergences Stoch (sans bornes) ---
-            var (sTop, sBot, sBearReg, sBullReg, sBearHid, sBullHid) =
+            var (sTop, sBot, sBearReg, sBullReg, sBearHid, sBullHid, sPrevTopBar, sPrevBotBar) =
                 Divergence.Step(_kMem, Bars.HighPrices, Bars.LowPrices, index, 0, 0, false, _memStoch);
-            bool sBear = (StochShowDiv && sBearReg) || (StochShowHiddenDiv && sBearHid);
-            bool sBull = (StochShowDiv && sBullReg) || (StochShowHiddenDiv && sBullHid);
-
-            // Marqueurs au pivot (osc[index-2]), équiv plot offset -2 Pine.
-            if (index >= 2)
-            {
-                RsiBearMark[index - 2]   = (RsiShow   && rTop && rBear) ? _rsi.Result[index - 2] : double.NaN;
-                RsiBullMark[index - 2]   = (RsiShow   && rBot && rBull) ? _rsi.Result[index - 2] : double.NaN;
-                StochBearMark[index - 2] = (StochShow && sTop && sBear) ? _kMem[index - 2] : double.NaN;
-                StochBullMark[index - 2] = (StochShow && sBot && sBull) ? _kMem[index - 2] : double.NaN;
-            }
+            if (StochShow && sTop && ((StochShowDiv && sBearReg) || (StochShowHiddenDiv && sBearHid)))
+                DrawDivLine(StochBearMark, _kMem, sPrevTopBar, index - 2);
+            if (StochShow && sBot && ((StochShowDiv && sBullReg) || (StochShowHiddenDiv && sBullHid)))
+                DrawDivLine(StochBullMark, _kMem, sPrevBotBar, index - 2);
         }
     }
 }

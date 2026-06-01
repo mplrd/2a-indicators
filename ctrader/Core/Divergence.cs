@@ -10,6 +10,7 @@ namespace _2Ai.Indicators.Core
     public class DivergenceMemory
     {
         public IndicatorDataSeries LastTopOsc, LastTopPrice, LastBotOsc, LastBotPrice;
+        public IndicatorDataSeries LastTopBar, LastBotBar;  // bar index du dernier pivot (pour tracer la ligne)
     }
 
     /// <summary>
@@ -23,8 +24,12 @@ namespace _2Ai.Indicators.Core
     /// </summary>
     public static class Divergence
     {
-        /// <returns>(topPivot, botPivot, bearRegular, bullRegular, bearHidden, bullHidden) pour la barre.</returns>
-        public static (bool topPivot, bool botPivot, bool bearReg, bool bullReg, bool bearHid, bool bullHid) Step(
+        /// <returns>
+        /// (topPivot, botPivot, bearRegular, bullRegular, bearHidden, bullHidden, prevTopBar, prevBotBar).
+        /// prevTopBar/prevBotBar = bar index du pivot PRÉCÉDENT (-1 si aucun) — pour tracer la ligne de
+        /// divergence du pivot précédent au pivot courant (index-2).
+        /// </returns>
+        public static (bool topPivot, bool botPivot, bool bearReg, bool bullReg, bool bearHid, bool bullHid, int prevTopBar, int prevBotBar) Step(
             DataSeries osc, DataSeries priceHigh, DataSeries priceLow, int index,
             double topLimit, double botLimit, bool useLimits, DivergenceMemory m)
         {
@@ -33,6 +38,10 @@ namespace _2Ai.Indicators.Core
             double prevTopPrice = index >= 1 ? m.LastTopPrice[index - 1] : double.NaN;
             double prevBotOsc   = index >= 1 ? m.LastBotOsc[index - 1]   : double.NaN;
             double prevBotPrice = index >= 1 ? m.LastBotPrice[index - 1] : double.NaN;
+            double prevTopBarD  = index >= 1 ? m.LastTopBar[index - 1]   : double.NaN;
+            double prevBotBarD  = index >= 1 ? m.LastBotBar[index - 1]   : double.NaN;
+            int prevTopBar = double.IsNaN(prevTopBarD) ? -1 : (int)prevTopBarD;
+            int prevBotBar = double.IsNaN(prevBotBarD) ? -1 : (int)prevBotBarD;
 
             bool topCond = false, botCond = false, bearReg = false, bullReg = false, bearHid = false, bullHid = false;
 
@@ -62,8 +71,10 @@ namespace _2Ai.Indicators.Core
             m.LastTopPrice[index] = topCond ? priceHigh[index - 2]  : prevTopPrice;
             m.LastBotOsc[index]   = botCond ? pOsc                  : prevBotOsc;
             m.LastBotPrice[index] = botCond ? priceLow[index - 2]   : prevBotPrice;
+            m.LastTopBar[index]   = topCond ? (index - 2)           : prevTopBarD;
+            m.LastBotBar[index]   = botCond ? (index - 2)           : prevBotBarD;
 
-            return (topCond, botCond, bearReg, bullReg, bearHid, bullHid);
+            return (topCond, botCond, bearReg, bullReg, bearHid, bullHid, prevTopBar, prevBotBar);
         }
     }
 }
