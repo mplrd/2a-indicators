@@ -18,10 +18,6 @@ namespace _2Ai.Indicators.Levels
     [Indicator(IsOverlay = true, AccessRights = AccessRights.None, AutoRescale = false)]
     public class Levels : Indicator
     {
-        // Couleurs/styles figés (defaults spec Pine).
-        private static readonly Color AthColor = Color.FromHex("#8B0000");
-        private static readonly Color HtfColor = Color.FromHex("#555555");
-
         // ============================================================
         // Parameters (enable + width ; cf. limite couleur/style)
         // ============================================================
@@ -141,20 +137,91 @@ namespace _2Ai.Indicators.Levels
         public bool ShowLabels { get; set; }
 
         // ============================================================
-        // Constantes Intraday (defaults spec ; cAlgo pourra exposer les strings plus tard)
+        // Couleurs + styles (quadruplet spec Pine ; defaults = couleurs/styles d'origine).
+        // Noms alignés sur les usages dans Calculate. ARGB hex opaque (l'alpha est réappliqué au rendu).
+        // ============================================================
+        [Parameter("ATH couleur", DefaultValue = "FF8B0000", Group = "Niveaux HTF")]
+        public Color AthColor { get; set; }
+        [Parameter("ATH style", DefaultValue = LineStyle.Lines, Group = "Niveaux HTF")]
+        public LineStyle AthStyle { get; set; }
+        [Parameter("Daily couleur", DefaultValue = "FF555555", Group = "Niveaux HTF")]
+        public Color DailyColor { get; set; }
+        [Parameter("Daily style", DefaultValue = LineStyle.Lines, Group = "Niveaux HTF")]
+        public LineStyle DailyStyle { get; set; }
+        [Parameter("Weekly couleur", DefaultValue = "FF555555", Group = "Niveaux HTF")]
+        public Color WeeklyColor { get; set; }
+        [Parameter("Weekly style", DefaultValue = LineStyle.Solid, Group = "Niveaux HTF")]
+        public LineStyle WeeklyStyle { get; set; }
+        [Parameter("Monthly couleur", DefaultValue = "FF555555", Group = "Niveaux HTF")]
+        public Color MonthlyColor { get; set; }
+        [Parameter("Monthly style", DefaultValue = LineStyle.Solid, Group = "Niveaux HTF")]
+        public LineStyle MonthlyStyle { get; set; }
+
+        [Parameter("Asian couleur", DefaultValue = "FFFFA500", Group = "Niveaux Intraday")]
+        public Color AsianColor { get; set; }
+        [Parameter("Asian style", DefaultValue = LineStyle.Lines, Group = "Niveaux Intraday")]
+        public LineStyle AsianStyle { get; set; }
+        [Parameter("EU couleur", DefaultValue = "FF0000FF", Group = "Niveaux Intraday")]
+        public Color EuColor { get; set; }
+        [Parameter("EU style", DefaultValue = LineStyle.Lines, Group = "Niveaux Intraday")]
+        public LineStyle EuStyle { get; set; }
+        [Parameter("US couleur", DefaultValue = "FF800080", Group = "Niveaux Intraday")]
+        public Color UsColor { get; set; }
+        [Parameter("US style", DefaultValue = LineStyle.Lines, Group = "Niveaux Intraday")]
+        public LineStyle UsStyle { get; set; }
+        [Parameter("OR couleur", DefaultValue = "FF000000", Group = "Niveaux Intraday")]
+        public Color OrColor { get; set; }
+        [Parameter("OR style", DefaultValue = LineStyle.Dots, Group = "Niveaux Intraday")]
+        public LineStyle OrStyle { get; set; }
+        [Parameter("Open Future couleur", DefaultValue = "FF555555", Group = "Niveaux Intraday")]
+        public Color OpenFutureColor { get; set; }
+        [Parameter("Open Future style", DefaultValue = LineStyle.Dots, Group = "Niveaux Intraday")]
+        public LineStyle OpenFutureStyle { get; set; }
+        [Parameter("Open Future width", DefaultValue = 1, MinValue = 1, MaxValue = 5, Group = "Niveaux Intraday")]
+        public int OpenFutureWidth { get; set; }
+        [Parameter("Open EU couleur", DefaultValue = "FF0000FF", Group = "Niveaux Intraday")]
+        public Color OpenEuColor { get; set; }
+        [Parameter("Open EU style", DefaultValue = LineStyle.Dots, Group = "Niveaux Intraday")]
+        public LineStyle OpenEuStyle { get; set; }
+        [Parameter("Open EU width", DefaultValue = 1, MinValue = 1, MaxValue = 5, Group = "Niveaux Intraday")]
+        public int OpenEuWidth { get; set; }
+        [Parameter("Open US couleur", DefaultValue = "FF800080", Group = "Niveaux Intraday")]
+        public Color OpenUsColor { get; set; }
+        [Parameter("Open US style", DefaultValue = LineStyle.Dots, Group = "Niveaux Intraday")]
+        public LineStyle OpenUsStyle { get; set; }
+        [Parameter("Open US width", DefaultValue = 1, MinValue = 1, MaxValue = 5, Group = "Niveaux Intraday")]
+        public int OpenUsWidth { get; set; }
+
+        [Parameter("Dyn Bull (ST/BB/MA)", DefaultValue = "FF008000", Group = "Niveaux dynamiques")]
+        public Color DynBull { get; set; }
+        [Parameter("Dyn Bear (ST/BB/MA)", DefaultValue = "FFFF0000", Group = "Niveaux dynamiques")]
+        public Color DynBear { get; set; }
+        [Parameter("ST D style", DefaultValue = LineStyle.Solid, Group = "Niveaux dynamiques")]
+        public LineStyle StDStyle { get; set; }
+        [Parameter("ST W style", DefaultValue = LineStyle.Solid, Group = "Niveaux dynamiques")]
+        public LineStyle StWStyle { get; set; }
+        [Parameter("BB Magique style", DefaultValue = LineStyle.Solid, Group = "Niveaux dynamiques")]
+        public LineStyle BbmStyle { get; set; }
+        [Parameter("BB Classique style", DefaultValue = LineStyle.Solid, Group = "Niveaux dynamiques")]
+        public LineStyle BbcStyle { get; set; }
+        [Parameter("MA 50 style", DefaultValue = LineStyle.Solid, Group = "Niveaux dynamiques")]
+        public LineStyle Ma50Style { get; set; }
+        [Parameter("MA 200 style", DefaultValue = LineStyle.Solid, Group = "Niveaux dynamiques")]
+        public LineStyle Ma200Style { get; set; }
+
+        [Parameter("IPA Bull", DefaultValue = "FF0000FF", Group = "Structure de marché")]
+        public Color IpaBull { get; set; }
+        [Parameter("IPA Bear", DefaultValue = "FFFFA500", Group = "Structure de marché")]
+        public Color IpaBear { get; set; }
+        [Parameter("IPA style", DefaultValue = LineStyle.Dots, Group = "Structure de marché")]
+        public LineStyle IpaStyle { get; set; }
+        [Parameter("Gaps couleur", DefaultValue = "FFCCCCCC", Group = "Structure de marché")]
+        public Color GapsColor { get; set; }
+
+        // ============================================================
+        // Couleurs / styles (params — quadruplet spec ; cf. fin de classe pour les Color/LineStyle)
         // ============================================================
         private const string ChartTz = "Europe/Paris";
-        private static readonly Color AsianColor = Color.Orange;
-        private static readonly Color EuColor     = Color.Blue;
-        private static readonly Color UsColor      = Color.Purple;
-        private static readonly Color OrColor      = Color.Black;
-
-        // Niveaux dynamiques : couleurs bull/bear partagées (ST par direction ; BB/MA par position).
-        private static readonly Color DynBull = Color.Green;
-        private static readonly Color DynBear = Color.Red;
-        private static readonly Color IpaBull = Color.Blue;    // support
-        private static readonly Color IpaBear = Color.Orange;  // résistance
-        private static readonly Color GapsColor = Color.FromHex("#CCCCCC");
         // Defaults projet (hardcodés comme dans Layout) : ST ATR/factor, BB longueurs/mult, flat.
         private const int    StAtrPeriod = 10;
         private const double StFactor    = 3.0;
@@ -248,50 +315,50 @@ namespace _2Ai.Indicators.Levels
             var chartStart = Bars.OpenTimes[0];             // ancrage gauche des dynamiques
 
             // ATH + previous : de la bougie d'origine → courante +5, label au bout.
-            DrawHtf("ATH", AthEnabled, _ath.Value, _ath.Time ?? now, rightEnd, AthColor, AthWidth, LineStyle.Lines, "ATH", true);
+            DrawHtf("ATH", AthEnabled, _ath.Value, _ath.Time ?? now, rightEnd, AthColor, AthWidth, AthStyle, "ATH", true);
 
             // PDH / PDL.
             var (pdH, pdL) = CoreLevels.PreviousPeriodHL(_daily, now);
             var pdStart = CoreLevels.PreviousPeriodStartUtc(_daily, now) ?? now;
-            DrawHtf("PDH", DailyEnabled && showDaily, pdH, pdStart, rightEnd, HtfColor, DailyWidth, LineStyle.Lines, "PDH", true);
-            DrawHtf("PDL", DailyEnabled && showDaily, pdL, pdStart, rightEnd, HtfColor, DailyWidth, LineStyle.Lines, "PDL", false);
+            DrawHtf("PDH", DailyEnabled && showDaily, pdH, pdStart, rightEnd, DailyColor, DailyWidth, DailyStyle, "PDH", true);
+            DrawHtf("PDL", DailyEnabled && showDaily, pdL, pdStart, rightEnd, DailyColor, DailyWidth, DailyStyle, "PDL", false);
 
             // PWH / PWL.
             var (pwH, pwL) = CoreLevels.PreviousPeriodHL(_weekly, now);
             var pwStart = CoreLevels.PreviousPeriodStartUtc(_weekly, now) ?? now;
-            DrawHtf("PWH", WeeklyEnabled && showWeekly, pwH, pwStart, rightEnd, HtfColor, WeeklyWidth, LineStyle.Solid, "PWH", true);
-            DrawHtf("PWL", WeeklyEnabled && showWeekly, pwL, pwStart, rightEnd, HtfColor, WeeklyWidth, LineStyle.Solid, "PWL", false);
+            DrawHtf("PWH", WeeklyEnabled && showWeekly, pwH, pwStart, rightEnd, WeeklyColor, WeeklyWidth, WeeklyStyle, "PWH", true);
+            DrawHtf("PWL", WeeklyEnabled && showWeekly, pwL, pwStart, rightEnd, WeeklyColor, WeeklyWidth, WeeklyStyle, "PWL", false);
 
             // PMH / PML.
             var (pmH, pmL) = CoreLevels.PreviousPeriodHL(_monthly, now);
             var pmStart = CoreLevels.PreviousPeriodStartUtc(_monthly, now) ?? now;
-            DrawHtf("PMH", MonthlyEnabled && showMonthly, pmH, pmStart, rightEnd, HtfColor, MonthlyWidth, LineStyle.Solid, "PMH", true);
-            DrawHtf("PML", MonthlyEnabled && showMonthly, pmL, pmStart, rightEnd, HtfColor, MonthlyWidth, LineStyle.Solid, "PML", false);
+            DrawHtf("PMH", MonthlyEnabled && showMonthly, pmH, pmStart, rightEnd, MonthlyColor, MonthlyWidth, MonthlyStyle, "PMH", true);
+            DrawHtf("PML", MonthlyEnabled && showMonthly, pmL, pmStart, rightEnd, MonthlyColor, MonthlyWidth, MonthlyStyle, "PML", false);
 
             // --- Intraday (strict < H1) ---
             // Sessions H/L : bornées à [start, end] (figées dès le début de session côté tracker).
-            DrawSession("AsianH", AsianEnabled && showIntraday && _asian.SeenToday, _asian.High, _asian.StartUtc, _asian.EndUtc, AsianColor, AsianWidth, LineStyle.Lines, "Asian H");
-            DrawSession("AsianL", AsianEnabled && showIntraday && _asian.SeenToday, _asian.Low,  _asian.StartUtc, _asian.EndUtc, AsianColor, AsianWidth, LineStyle.Lines, "Asian L");
-            DrawSession("EuH",    EuEnabled    && showIntraday && _eu.SeenToday,    _eu.High,    _eu.StartUtc,    _eu.EndUtc,    EuColor,    EuWidth,    LineStyle.Lines, "EU H");
-            DrawSession("EuL",    EuEnabled    && showIntraday && _eu.SeenToday,    _eu.Low,     _eu.StartUtc,    _eu.EndUtc,    EuColor,    EuWidth,    LineStyle.Lines, "EU L");
-            DrawSession("UsH",    UsEnabled    && showIntraday && _us.SeenToday,    _us.High,    _us.StartUtc,    _us.EndUtc,    UsColor,    UsWidth,    LineStyle.Lines, "US H");
-            DrawSession("UsL",    UsEnabled    && showIntraday && _us.SeenToday,    _us.Low,     _us.StartUtc,    _us.EndUtc,    UsColor,    UsWidth,    LineStyle.Lines, "US L");
+            DrawSession("AsianH", AsianEnabled && showIntraday && _asian.SeenToday, _asian.High, _asian.StartUtc, _asian.EndUtc, AsianColor, AsianWidth, AsianStyle, "Asian H");
+            DrawSession("AsianL", AsianEnabled && showIntraday && _asian.SeenToday, _asian.Low,  _asian.StartUtc, _asian.EndUtc, AsianColor, AsianWidth, AsianStyle, "Asian L");
+            DrawSession("EuH",    EuEnabled    && showIntraday && _eu.SeenToday,    _eu.High,    _eu.StartUtc,    _eu.EndUtc,    EuColor,    EuWidth,    EuStyle, "EU H");
+            DrawSession("EuL",    EuEnabled    && showIntraday && _eu.SeenToday,    _eu.Low,     _eu.StartUtc,    _eu.EndUtc,    EuColor,    EuWidth,    EuStyle, "EU L");
+            DrawSession("UsH",    UsEnabled    && showIntraday && _us.SeenToday,    _us.High,    _us.StartUtc,    _us.EndUtc,    UsColor,    UsWidth,    UsStyle, "US H");
+            DrawSession("UsL",    UsEnabled    && showIntraday && _us.SeenToday,    _us.Low,     _us.StartUtc,    _us.EndUtc,    UsColor,    UsWidth,    UsStyle, "US L");
 
             // Opens : ligne ongoing (start = open de session → maintenant), pointillé. Off par défaut.
-            DrawSession("OpenFuture", OpenFutureEnabled && showIntraday && _futureOpen.SeenToday, _futureOpen.Price, _futureOpen.TimeUtc, rightEnd, HtfColor, 1, LineStyle.Dots, "Open Future");
-            DrawSession("OpenEU",     OpenEuEnabled     && showIntraday && _euOpen.SeenToday,     _euOpen.Price,     _euOpen.TimeUtc,     rightEnd, EuColor,  1, LineStyle.Dots, "Open EU");
-            DrawSession("OpenUS",     OpenUsEnabled     && showIntraday && _usOpen.SeenToday,     _usOpen.Price,     _usOpen.TimeUtc,     rightEnd, UsColor,  1, LineStyle.Dots, "Open US");
+            DrawSession("OpenFuture", OpenFutureEnabled && showIntraday && _futureOpen.SeenToday, _futureOpen.Price, _futureOpen.TimeUtc, rightEnd, OpenFutureColor, OpenFutureWidth, OpenFutureStyle, "Open Future");
+            DrawSession("OpenEU",     OpenEuEnabled     && showIntraday && _euOpen.SeenToday,     _euOpen.Price,     _euOpen.TimeUtc,     rightEnd, OpenEuColor,     OpenEuWidth,     OpenEuStyle, "Open EU");
+            DrawSession("OpenUS",     OpenUsEnabled     && showIntraday && _usOpen.SeenToday,     _usOpen.Price,     _usOpen.TimeUtc,     rightEnd, OpenUsColor,     OpenUsWidth,     OpenUsStyle, "Open US");
 
             // Open Range : H/L figés après 60 min, ligne ongoing toute la journée chart.
-            DrawSession("OrH", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.High, _or.StartUtc, rightEnd, OrColor, OrWidth, LineStyle.Dots, "OR H");
-            DrawSession("OrL", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.Low,  _or.StartUtc, rightEnd, OrColor, OrWidth, LineStyle.Dots, "OR L");
+            DrawSession("OrH", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.High, _or.StartUtc, rightEnd, OrColor, OrWidth, OrStyle, "OR H");
+            DrawSession("OrL", OrEnabled && showIntraday && _or.StartUtc.HasValue, _or.Low,  _or.StartUtc, rightEnd, OrColor, OrWidth, OrStyle, "OR L");
 
             // --- Niveaux dynamiques (Supertrend / BB / MA) — ligne horizontale dynStart→now ---
             double close = Bars.ClosePrices[index];
-            void Dyn(string id, bool show, double value, Color color, int width, string label)
-                => DrawDynamic(id, show, value, color, width, label, chartStart, rightEnd);
+            void Dyn(string id, bool show, double value, Color color, int width, LineStyle style, string label)
+                => DrawDynamic(id, show, value, color, width, style, label, chartStart, rightEnd);
             Color Pos(double v) => Draw.PositionColor(v, close, DynBull, DynBear);
-            void Bb(string idU, string idL, bool show, Bars bars, int length, double mi, double mo, int width, string lbl)
+            void Bb(string idU, string idL, bool show, Bars bars, int length, double mi, double mo, int width, LineStyle style, string lbl)
             {
                 int li = bars.OpenTimes.GetIndexByTime(now);
                 double oU = double.NaN, oL = double.NaN; bool dU = false, dL = false;
@@ -300,30 +367,30 @@ namespace _2Ai.Indicators.Levels
                     var r = Bollinger.HtfLevels(bars.ClosePrices, li, length, mi, mo, FlatPeriod, FlatThreshold);
                     oU = r.outerUpper; oL = r.outerLower; dU = r.drawUpper; dL = r.drawLower;
                 }
-                Dyn(idU, show && dU, oU, Pos(oU), width, lbl);
-                Dyn(idL, show && dL, oL, Pos(oL), width, lbl);
+                Dyn(idU, show && dU, oU, Pos(oU), width, style, lbl);
+                Dyn(idL, show && dL, oL, Pos(oL), width, style, lbl);
             }
 
             // Supertrend D/W : couleur par DIRECTION (bull/bear), pas par position.
             var (stDVal, stDDir) = Supertrend.RunLast(_daily,  _atrD.Result, StFactor, now);
             var (stWVal, stWDir) = Supertrend.RunLast(_weekly, _atrW.Result, StFactor, now);
-            Dyn("StD", StDEnabled && showSTD, stDVal, stDDir > 0 ? DynBull : DynBear, StDWidth, "ST D");
-            Dyn("StW", StWEnabled && showSTW, stWVal, stWDir > 0 ? DynBull : DynBear, StWWidth, "ST W");
+            Dyn("StD", StDEnabled && showSTD, stDVal, stDDir > 0 ? DynBull : DynBear, StDWidth, StDStyle, "ST D");
+            Dyn("StW", StWEnabled && showSTW, stWVal, stWDir > 0 ? DynBull : DynBear, StWWidth, StWStyle, "ST W");
 
             // MA 50 / 200 sur D/W : couleur par position.
-            Dyn("Ma50D",  Ma50Enabled  && showMaD, _ma50D.Result.LastValue,  Pos(_ma50D.Result.LastValue),  Ma50Width,  "MA 50 D");
-            Dyn("Ma50W",  Ma50Enabled  && showMaW, _ma50W.Result.LastValue,  Pos(_ma50W.Result.LastValue),  Ma50Width,  "MA 50 W");
-            Dyn("Ma200D", Ma200Enabled && showMaD, _ma200D.Result.LastValue, Pos(_ma200D.Result.LastValue), Ma200Width, "MA 200 D");
-            Dyn("Ma200W", Ma200Enabled && showMaW, _ma200W.Result.LastValue, Pos(_ma200W.Result.LastValue), Ma200Width, "MA 200 W");
+            Dyn("Ma50D",  Ma50Enabled  && showMaD, _ma50D.Result.LastValue,  Pos(_ma50D.Result.LastValue),  Ma50Width,  Ma50Style,  "MA 50 D");
+            Dyn("Ma50W",  Ma50Enabled  && showMaW, _ma50W.Result.LastValue,  Pos(_ma50W.Result.LastValue),  Ma50Width,  Ma50Style,  "MA 50 W");
+            Dyn("Ma200D", Ma200Enabled && showMaD, _ma200D.Result.LastValue, Pos(_ma200D.Result.LastValue), Ma200Width, Ma200Style, "MA 200 D");
+            Dyn("Ma200W", Ma200Enabled && showMaW, _ma200W.Result.LastValue, Pos(_ma200W.Result.LastValue), Ma200Width, Ma200Style, "MA 200 W");
 
             // BB Magique (H1/H4/D/W) & Classique (H4/D/W) : niveau si bande plate-ou-fermeture.
-            Bb("BbmH1U", "BbmH1L", BbmEnabled && showBBmH1, _h1,     BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M H1");
-            Bb("BbmH4U", "BbmH4L", BbmEnabled && showBBmH4, _h4,     BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M H4");
-            Bb("BbmDU",  "BbmDL",  BbmEnabled && showBBmD,  _daily,  BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M D");
-            Bb("BbmWU",  "BbmWL",  BbmEnabled && showBBmW,  _weekly, BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, "BB M W");
-            Bb("BbcH4U", "BbcH4L", BbcEnabled && showBBcH4, _h4,     BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB H4");
-            Bb("BbcDU",  "BbcDL",  BbcEnabled && showBBcD,  _daily,  BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB D");
-            Bb("BbcWU",  "BbcWL",  BbcEnabled && showBBcW,  _weekly, BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, "BB W");
+            Bb("BbmH1U", "BbmH1L", BbmEnabled && showBBmH1, _h1,     BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, BbmStyle, "BB M H1");
+            Bb("BbmH4U", "BbmH4L", BbmEnabled && showBBmH4, _h4,     BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, BbmStyle, "BB M H4");
+            Bb("BbmDU",  "BbmDL",  BbmEnabled && showBBmD,  _daily,  BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, BbmStyle, "BB M D");
+            Bb("BbmWU",  "BbmWL",  BbmEnabled && showBBmW,  _weekly, BbmLength, BbmMultInner, BbmMultOuter, BbmWidth, BbmStyle, "BB M W");
+            Bb("BbcH4U", "BbcH4L", BbcEnabled && showBBcH4, _h4,     BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, BbcStyle, "BB H4");
+            Bb("BbcDU",  "BbcDL",  BbcEnabled && showBBcD,  _daily,  BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, BbcStyle, "BB D");
+            Bb("BbcWU",  "BbcWL",  BbcEnabled && showBBcW,  _weekly, BbcLength, BbcMultInner, BbcMultOuter, BbcWidth, BbcStyle, "BB W");
 
             // --- IPA (structure de marché) : ray ancré au pivot, couleur par position vs prix.
             // Seuls les IPA cassés se dessinent. Nettoyage des objets au-delà du compte courant.
@@ -335,7 +402,7 @@ namespace _2Ai.Indicators.Levels
                 if (IpaEnabled && ipa.Broken && ipa.Bar >= 0 && ipa.Bar < Bars.Count)
                 {
                     var col = Draw.PositionColor(ipa.Price, close, IpaBull, IpaBear);
-                    Draw.DrawLevel(Chart, nm, Bars.OpenTimes[ipa.Bar], futureEnd, ipa.Price, col, IpaWidth, LineStyle.Dots, "", false, futureEnd);
+                    Draw.DrawLevel(Chart, nm, Bars.OpenTimes[ipa.Bar], futureEnd, ipa.Price, col, IpaWidth, IpaStyle, "", false, futureEnd);
                 }
                 else
                 {
@@ -393,12 +460,12 @@ namespace _2Ai.Indicators.Levels
         /// Niveau dynamique (Supertrend / BB / MA) : ligne horizontale solide de
         /// <paramref name="start"/> à <paramref name="end"/>. Désactivé ou NaN → retiré.
         /// </summary>
-        private void DrawDynamic(string id, bool show, double value, Color color, int width, string label,
+        private void DrawDynamic(string id, bool show, double value, Color color, int width, LineStyle style, string label,
             DateTime start, DateTime end)
         {
             double v = (show && !double.IsNaN(value)) ? value : double.NaN;
             // Étend à gauche (chartStart) jusqu'à courante +5 (end), label au bout.
-            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, LineStyle.Solid, label, ShowLabels, end);
+            Draw.DrawLevel(Chart, "Lvl_" + id, start, end, v, color, width, style, label, ShowLabels, end);
         }
     }
 }

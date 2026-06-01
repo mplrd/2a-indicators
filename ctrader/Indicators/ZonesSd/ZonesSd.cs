@@ -18,28 +18,40 @@ namespace _2Ai.Indicators.ZonesSd
     {
         private const int MaxZones = 100;
         private const int FillAlpha = 85, BorderAlpha = 40;
-        private static readonly Color DemandColor  = Color.Blue;
-        private static readonly Color SupplyColor   = Color.Orange;
-        private static readonly Color FvgBullColor = Color.Green;
-        private static readonly Color FvgBearColor = Color.Red;
 
         [Parameter("Demand", DefaultValue = true, Group = "Supply / Demand")]
         public bool DemandEnabled { get; set; }
+        [Parameter("Demand couleur", DefaultValue = "FF0000FF", Group = "Supply / Demand")]  // blue
+        public Color DemandColor { get; set; }
+        [Parameter("Demand style", DefaultValue = LineStyle.Solid, Group = "Supply / Demand")]
+        public LineStyle DemandStyle { get; set; }
         [Parameter("Demand bordure", DefaultValue = 1, MinValue = 0, MaxValue = 4, Group = "Supply / Demand")]
         public int DemandBorderWidth { get; set; }
 
         [Parameter("Supply", DefaultValue = true, Group = "Supply / Demand")]
         public bool SupplyEnabled { get; set; }
+        [Parameter("Supply couleur", DefaultValue = "FFFFA500", Group = "Supply / Demand")]  // orange
+        public Color SupplyColor { get; set; }
+        [Parameter("Supply style", DefaultValue = LineStyle.Solid, Group = "Supply / Demand")]
+        public LineStyle SupplyStyle { get; set; }
         [Parameter("Supply bordure", DefaultValue = 1, MinValue = 0, MaxValue = 4, Group = "Supply / Demand")]
         public int SupplyBorderWidth { get; set; }
 
         [Parameter("FVG Bullish", DefaultValue = true, Group = "Fair Value Gaps")]
         public bool FvgBullEnabled { get; set; }
+        [Parameter("FVG Bull couleur", DefaultValue = "FF008000", Group = "Fair Value Gaps")]  // green
+        public Color FvgBullColor { get; set; }
+        [Parameter("FVG Bull style", DefaultValue = LineStyle.Lines, Group = "Fair Value Gaps")]
+        public LineStyle FvgBullStyle { get; set; }
         [Parameter("FVG Bull bordure", DefaultValue = 0, MinValue = 0, MaxValue = 4, Group = "Fair Value Gaps")]
         public int FvgBullBorderWidth { get; set; }
 
         [Parameter("FVG Bearish", DefaultValue = true, Group = "Fair Value Gaps")]
         public bool FvgBearEnabled { get; set; }
+        [Parameter("FVG Bear couleur", DefaultValue = "FFFF0000", Group = "Fair Value Gaps")]  // red
+        public Color FvgBearColor { get; set; }
+        [Parameter("FVG Bear style", DefaultValue = LineStyle.Lines, Group = "Fair Value Gaps")]
+        public LineStyle FvgBearStyle { get; set; }
         [Parameter("FVG Bear bordure", DefaultValue = 0, MinValue = 0, MaxValue = 4, Group = "Fair Value Gaps")]
         public int FvgBearBorderWidth { get; set; }
 
@@ -78,9 +90,9 @@ namespace _2Ai.Indicators.ZonesSd
                 bool keep = z.IsActive && (!SafeMode || ZoneOps.FindOverlappingActiveSameSide(_fvg.Zones, z));
                 bool bull = z.Side == ZoneSide.Bull;
                 if (keep && DemandEnabled && bull)
-                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, DemandColor, DemandBorderWidth, LineStyle.Solid, FillAlpha, BorderAlpha);
+                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, DemandColor, DemandBorderWidth, DemandStyle, FillAlpha, BorderAlpha);
                 else if (keep && SupplyEnabled && !bull)
-                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, SupplyColor, SupplyBorderWidth, LineStyle.Solid, FillAlpha, BorderAlpha);
+                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, SupplyColor, SupplyBorderWidth, SupplyStyle, FillAlpha, BorderAlpha);
                 else { Chart.RemoveObject(nm + "_f"); Chart.RemoveObject(nm + "_b"); }
             }
             for (int i = sd.Count; i < _sdPrevCount; i++) { Chart.RemoveObject("Sd_" + i + "_f"); Chart.RemoveObject("Sd_" + i + "_b"); }
@@ -95,9 +107,9 @@ namespace _2Ai.Indicators.ZonesSd
                 bool keep = z.IsActive && (!SafeMode || ZoneOps.FindOverlappingActiveSameSide(_sd.Zones, z));
                 bool bull = z.Side == ZoneSide.Bull;
                 if (keep && FvgBullEnabled && bull)
-                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, FvgBullColor, FvgBullBorderWidth, LineStyle.Lines, FillAlpha, BorderAlpha);
+                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, FvgBullColor, FvgBullBorderWidth, FvgBullStyle, FillAlpha, BorderAlpha);
                 else if (keep && FvgBearEnabled && !bull)
-                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, FvgBearColor, FvgBearBorderWidth, LineStyle.Lines, FillAlpha, BorderAlpha);
+                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, FvgBearColor, FvgBearBorderWidth, FvgBearStyle, FillAlpha, BorderAlpha);
                 else { Chart.RemoveObject(nm + "_f"); Chart.RemoveObject(nm + "_b"); }
             }
             for (int i = fv.Count; i < _fvgPrevCount; i++) { Chart.RemoveObject("Fvg_" + i + "_f"); Chart.RemoveObject("Fvg_" + i + "_b"); }

@@ -21,10 +21,13 @@ namespace _2Ai.Indicators.ZonesCmi
     {
         private const string ChartTz = "Europe/Paris";
         private const int FillAlpha = 85, BorderAlpha = 40;
-        private static readonly Color ZoneColor = Color.Teal;
 
         [Parameter("Zones", DefaultValue = true, Group = "Zones CMI")]
         public bool Enabled { get; set; }
+        [Parameter("Couleur", DefaultValue = "FF008080", Group = "Zones CMI")]  // teal
+        public Color ZoneColor { get; set; }
+        [Parameter("Style bordure", DefaultValue = LineStyle.Solid, Group = "Zones CMI")]
+        public LineStyle BorderStyle { get; set; }
         [Parameter("Bordure", DefaultValue = 1, MinValue = 0, MaxValue = 4, Group = "Zones CMI")]
         public int BorderWidth { get; set; }
 
@@ -68,7 +71,7 @@ namespace _2Ai.Indicators.ZonesCmi
                 var z = zones[i];
                 string nm = "Cmi_" + i;
                 if (Enabled && z.State == CmiState.Active)
-                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, ZoneColor, BorderWidth, LineStyle.Solid, FillAlpha, BorderAlpha);
+                    Draw.DrawZoneBox(Chart, nm, z.LeftTime, futureEnd, z.Top, z.Bottom, ZoneColor, BorderWidth, BorderStyle, FillAlpha, BorderAlpha);
                 else { Chart.RemoveObject(nm + "_f"); Chart.RemoveObject(nm + "_b"); }
             }
             for (int i = zones.Count; i < _prevCount; i++) { Chart.RemoveObject("Cmi_" + i + "_f"); Chart.RemoveObject("Cmi_" + i + "_b"); }
