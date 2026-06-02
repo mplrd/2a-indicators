@@ -1,0 +1,17 @@
+
+# .NET build artifacts
+bin/
+obj/
+# Sortie centralisée (Directory.Build.props → UseArtifactsOutput)
+artifacts/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Rider
+.idea/
+
+# JetBrains workspace
+*.dotsettings.user
