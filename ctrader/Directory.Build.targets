@@ -1,0 +1,20 @@
+<Project>
+
+  <!-- Copie le .algo final de chaque indicateur dans artifacts/publish/<Projet>/<config>/ (arbo
+       .NET artifacts native : un sous-dossier par projet, pivot = config en minuscules), ce qui
+       REMPLIT les dossiers publish/<projet>/<config>/ que la feature artifacts réserve sinon vides.
+       En plus de la publication auto vers %USERPROFILE%\Documents\cAlgo\Sources\Indicators\
+       (target _CopyToSources de cTrader.Automate, qui rend l'indicateur chargeable, conservée).
+       Hook après _BundleAlgo : le .algo existe dans $(OutDir) avec le nom forcé par _ForceAlgoName.
+       Le projet Core (lib, pas d'indicateur) ne produit pas de .algo → copie skippée (ItemGroup vide). -->
+  <Target Name="_CollectAlgoToPublish" AfterTargets="_BundleAlgo;_CopyToSources">
+    <ItemGroup>
+      <_AlgoArtifact Include="$(OutDir)*.algo" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_AlgoArtifact)"
+          DestinationFolder="$(ArtifactsPath)\publish\$(MSBuildProjectName)\$(Configuration.ToLowerInvariant())"
+          SkipUnchangedFiles="true"
+          Condition="'@(_AlgoArtifact)' != ''" />
+  </Target>
+
+</Project>

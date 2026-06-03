@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>2Ai.Indicators.ZonesMtf</AssemblyName>
+    <RootNamespace>_2Ai.Indicators.ZonesMtf</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="cTrader.Automate" Version="*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Core\Core.csproj" />
+  </ItemGroup>
+
+  <!-- cf. Layout.csproj : nom de .algo forcé (sinon nommé d'après le dossier parent "Indicators"). -->
+  <Target Name="_ForceAlgoName" BeforeTargets="_ExtractMetadata;_BundleAlgo;_CopyToSources">
+    <PropertyGroup>
+      <_AlgoFileName>2Ai Zones MTF.algo</_AlgoFileName>
+      <_AlgoFilePath>$(OutDir)$(_AlgoFileName)</_AlgoFilePath>
+      <_AlgoMetadataFileName>$(_AlgoFileName).metadata</_AlgoMetadataFileName>
+      <_AlgoMetadataFilePath>$(OutDir)$(_AlgoMetadataFileName)</_AlgoMetadataFilePath>
+    </PropertyGroup>
+  </Target>
+
+</Project>

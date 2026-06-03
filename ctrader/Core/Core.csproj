@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <AssemblyName>2Ai.Indicators.Core</AssemblyName>
+    <RootNamespace>_2Ai.Indicators.Core</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <!-- cAlgo charge les DLL via réflexion ; on ne génère pas de PDB en release -->
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Référence vers cAlgo.API.dll. Ajuste le HintPath selon ton install cTrader.
+         Chemins typiques :
+           - %USERPROFILE%\Documents\cAlgo\API\cAlgo.API.dll
+           - C:\Program Files\cTrader\cAlgo.API.dll
+         Private=false : le DLL n'est PAS copié à côté de Core.dll (cAlgo le fournit). -->
+    <Reference Include="cAlgo.API">
+      <HintPath>$(USERPROFILE)\Documents\cAlgo\API\cAlgo.API.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>
