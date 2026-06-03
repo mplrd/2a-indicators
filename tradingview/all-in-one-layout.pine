@@ -1,0 +1,450 @@
+//@version=6
+// @description 2Ai All-In-One Layout — version "tout-en-un" overlay pour compte TradingView gratuit
+//              (limité en nombre d'indicateurs). Regroupe dans UN seul script, sur sélection :
+//                - Layout : Bollinger Classique (+ribbon) & Magique, MA 7/20/50/200, Ichimoku, Supertrend.
+//                - Levels : ATH, PDH/PDL, PWH/PWL, PMH/PML, session Asiatique, Open Range.
+//                - Zones S/D : Supply, Demand, filtre 5★ (les FVG sont calculés pour le filtre mais NON dessinés).
+//              Aucune logique dupliquée : tout vient des libs. Features hors périmètre (IPA, Gaps,
+//              niveaux dynamiques HTF, sessions EU/US, Opens, FVG affichés, zones CMI/MTF) volontairement absentes.
+// max_bars_back = 5000 : les niveaux ATH/PD/PW/PM ancrent une ligne sur une barre d'origine lointaine.
+indicator("All-In-One Layout", shorttitle = "AIO Layout", overlay = true, max_lines_count = 500, max_boxes_count = 500, max_labels_count = 500, max_bars_back = 5000)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_series/3     as series
+import mpilard/lib_bollinger/4  as bb
+import mpilard/lib_ma/4         as ma
+import mpilard/lib_ichimoku/1   as ichi
+import mpilard/lib_supertrend/1 as st
+import mpilard/lib_levels/12    as levels
+import mpilard/lib_signal/2     as signal
+import mpilard/lib_zone/2       as zone
+import mpilard/lib_sd/2         as sd
+import mpilard/lib_fvg/4        as fvg
+import mpilard/lib_draw/18      as draw
+
+// TZ d'affichage du chart (Pine ne l'expose pas) — hardcodée projet. Contrôle minuit chart (reset session/OR).
+chartTz = "Europe/Paris"
+
+// ============================================================
+// Inputs — Apparence globale
+// ============================================================
+var appearanceGroup = "Apparence Globale"
+bullColor = input.color(color.green, "Couleur Haussière", inline = "colors", group = appearanceGroup)
+bearColor = input.color(color.red,   "Couleur Baissière", inline = "colors", group = appearanceGroup)
+
+// ============================================================
+// Inputs — Bandes de Bollinger
+// ============================================================
+var bollingerGroup = "Bandes de Bollinger"
+bbcEnabled   = input.bool(true,                 "Bollinger Classique", inline = "classic_bb", group = bollingerGroup)
+bbcColor     = input.color(#9c9c9c,             "",                    inline = "classic_bb", group = bollingerGroup)
+bbcMode      = input.string("ribbon",           "",                    inline = "classic_bb", group = bollingerGroup, options = ["simple", "ribbon"])
+bbcLineStyle = input.enum(draw.LineStyle.SOLID, "",                    inline = "classic_bb", group = bollingerGroup)
+
+bbmEnabled   = input.bool(true,                 "Bollinger Magique",   inline = "magic_bb", group = bollingerGroup)
+bbmColor     = input.color(#808080,             "",                    inline = "magic_bb", group = bollingerGroup)
+bbmMode      = input.string("simple",           "",                    inline = "magic_bb", group = bollingerGroup, options = ["simple", "ribbon"])
+bbmLineStyle = input.enum(draw.LineStyle.SOLID, "",                    inline = "magic_bb", group = bollingerGroup)
+
+flatEnabled   = input.bool(true,   "Bandes Plates : ", inline = "flat_detection", group = bollingerGroup)
+flatPeriod    = input.int(2,       "Période",          inline = "flat_detection", group = bollingerGroup, minval = 1,     maxval = 20)
+flatThreshold = input.float(0.015, "Seuil %",          inline = "flat_detection", group = bollingerGroup, minval = 0.001, maxval = 1.0, step = 0.001)
+
+projectBB = input.bool(true, "Projeter les bandes", inline = "bb_projection", group = bollingerGroup)
+
+// ============================================================
+// Inputs — Moyennes Mobiles
+// ============================================================
+var maGroup = "Moyennes Mobiles"
+ma7Enabled   = input.bool(true,                  "MA7",   inline = "ma7", group = maGroup)
+ma7Color     = input.color(color.aqua,           "",      inline = "ma7", group = maGroup)
+ma7Mode      = input.string("simple",            "",      inline = "ma7", group = maGroup, options = ["simple", "ribbon"])
+ma7LineStyle = input.enum(draw.LineStyle.DASHED, "",      inline = "ma7", group = maGroup)
+
+ma20Enabled   = input.bool(true,                 "MA20",  inline = "ma20", group = maGroup)
+ma20Color     = input.color(color.blue,          "",      inline = "ma20", group = maGroup)
+ma20Mode      = input.string("simple",           "",      inline = "ma20", group = maGroup, options = ["simple", "ribbon"])
+ma20LineStyle = input.enum(draw.LineStyle.SOLID, "",      inline = "ma20", group = maGroup)
+
+ma50Enabled   = input.bool(true,                 "MA50",  inline = "ma50", group = maGroup)
+ma50Color     = input.color(color.orange,        "",      inline = "ma50", group = maGroup)
+ma50Mode      = input.string("simple",           "",      inline = "ma50", group = maGroup, options = ["simple", "ribbon"])
+ma50LineStyle = input.enum(draw.LineStyle.SOLID, "",      inline = "ma50", group = maGroup)
+
+ma200Enabled   = input.bool(true,                  "MA200", inline = "ma200", group = maGroup)
+ma200Color     = input.color(color.gray,           "",      inline = "ma200", group = maGroup)
+ma200Mode      = input.string("simple",            "",      inline = "ma200", group = maGroup, options = ["simple", "ribbon"])
+ma200LineStyle = input.enum(draw.LineStyle.DASHED, "",      inline = "ma200", group = maGroup)
+
+projectMA = input.bool(true, "Projeter les MM", inline = "ma_projection", group = maGroup)
+
+// ============================================================
+// Inputs — Ichimoku
+// ============================================================
+var ichimokuGroup = "Ichimoku"
+ichiEnabled    = input.bool(true, "Afficher Ichimoku", inline = "ichimoku_toggle", group = ichimokuGroup)
+ichiChikouOnly = input.bool(true, "Chikou Uniquement", inline = "ichimoku_toggle", group = ichimokuGroup)
+ichiTenkanCol  = input.color(#d4a017,   "Tenkan", inline = "ichimoku_colors", group = ichimokuGroup)
+ichiKijunCol   = input.color(color.blue, "Kijun",  inline = "ichimoku_colors", group = ichimokuGroup)
+ichiChikouCol  = input.color(color.black,"Chikou", inline = "ichimoku_colors", group = ichimokuGroup)
+
+// ============================================================
+// Inputs — Supertrend (Oui par défaut dans l'AIO)
+// ============================================================
+var supertrendGroup = "Supertrend"
+stEnabled = input.bool(true, "Supertrend", inline = "supertrend_toggle", group = supertrendGroup)
+
+// ============================================================
+// Inputs — Niveaux HTF (Levels)
+// ============================================================
+var htfGroup = "Niveaux HTF"
+athEnabled = input.bool(true,                  "ATH", inline = "ath_level", group = htfGroup)
+athColor   = input.color(#8B0000,              "",    inline = "ath_level", group = htfGroup)
+athStyle   = input.enum(draw.LineStyle.DASHED, "",    inline = "ath_level", group = htfGroup)
+athWidth   = input.int(2,                      "",    inline = "ath_level", group = htfGroup, minval = 1, maxval = 5)
+
+dailyEnabled = input.bool(true,                  "Daily (PDH/PDL)", inline = "daily_level", group = htfGroup)
+dailyColor   = input.color(#555555,              "",                inline = "daily_level", group = htfGroup)
+dailyStyle   = input.enum(draw.LineStyle.DASHED, "",                inline = "daily_level", group = htfGroup)
+dailyWidth   = input.int(2,                      "",                inline = "daily_level", group = htfGroup, minval = 1, maxval = 5)
+
+weeklyEnabled = input.bool(true,                 "Weekly (PWH/PWL)", inline = "weekly_level", group = htfGroup)
+weeklyColor   = input.color(#555555,             "",                 inline = "weekly_level", group = htfGroup)
+weeklyStyle   = input.enum(draw.LineStyle.SOLID, "",                 inline = "weekly_level", group = htfGroup)
+weeklyWidth   = input.int(2,                     "",                 inline = "weekly_level", group = htfGroup, minval = 1, maxval = 5)
+
+monthlyEnabled = input.bool(true,                 "Monthly (PMH/PML)", inline = "monthly_level", group = htfGroup)
+monthlyColor   = input.color(#555555,             "",                  inline = "monthly_level", group = htfGroup)
+monthlyStyle   = input.enum(draw.LineStyle.SOLID, "",                  inline = "monthly_level", group = htfGroup)
+monthlyWidth   = input.int(3,                     "",                  inline = "monthly_level", group = htfGroup, minval = 1, maxval = 5)
+
+// ============================================================
+// Inputs — Niveaux Intraday (session Asiatique + Open Range)
+// ============================================================
+var intradayGroup = "Niveaux Intraday"
+asianEnabled = input.bool(true,                  "Session Asiatique", inline = "asian_session", group = intradayGroup)
+asianColor   = input.color(color.orange,         "",                  inline = "asian_session", group = intradayGroup)
+asianStyle   = input.enum(draw.LineStyle.DASHED, "",                  inline = "asian_session", group = intradayGroup)
+asianWidth   = input.int(2,                      "",                  inline = "asian_session", group = intradayGroup, minval = 1, maxval = 5)
+
+orEnabled = input.bool(true,                  "Open Range", inline = "or_level", group = intradayGroup)
+orColor   = input.color(#000000,              "",           inline = "or_level", group = intradayGroup)
+orStyle   = input.enum(draw.LineStyle.DOTTED, "",           inline = "or_level", group = intradayGroup)
+orWidth   = input.int(2,                      "",           inline = "or_level", group = intradayGroup, minval = 1, maxval = 5)
+
+// ============================================================
+// Inputs — Zones Supply / Demand
+// ============================================================
+var sdGroup = "Supply / Demand"
+demandEnabled     = input.bool(true,                 "Demand", inline = "demand", group = sdGroup)
+demandColor       = input.color(color.blue,          "",       inline = "demand", group = sdGroup)
+demandBorderStyle = input.enum(draw.LineStyle.SOLID, "",       inline = "demand", group = sdGroup)
+demandBorderWidth = input.int(1,                     "",       inline = "demand", group = sdGroup, minval = 0, maxval = 4)
+
+supplyEnabled     = input.bool(true,                 "Supply", inline = "supply", group = sdGroup)
+supplyColor       = input.color(color.orange,        "",       inline = "supply", group = sdGroup)
+supplyBorderStyle = input.enum(draw.LineStyle.SOLID, "",       inline = "supply", group = sdGroup)
+supplyBorderWidth = input.int(1,                     "",       inline = "supply", group = sdGroup, minval = 0, maxval = 4)
+
+// ============================================================
+// Inputs — Paramètres des Sessions (Asiatique uniquement ici)
+// ============================================================
+var sessionParamsGroup = "Paramètres des Sessions"
+asianSessionStr = input.session("0800-1400", "Asiatique", inline = "asian_params", group = sessionParamsGroup)
+asianTz         = input.string("Asia/Tokyo", "",          inline = "asian_params", group = sessionParamsGroup)
+
+// ============================================================
+// Inputs — Paramètres globaux
+// ============================================================
+var globalsGroup = "Paramètres globaux"
+showLabels = input.bool(true,  "Afficher les labels",        group = globalsGroup)
+safeMode   = input.bool(false, "Zones : Safe mode (5★ uniquement)", group = globalsGroup, tooltip = "N'affiche que les zones S/D alignées avec un FVG de même side (les FVG sont calculés mais non dessinés).")
+
+// ============================================================
+// Constantes (paramètres figés par les specs)
+// ============================================================
+BBC_LEN      = 20
+BBC_MULT_IN  = 2.0
+BBC_MULT_OUT = 2.5
+BBM_LEN      = 160
+BBM_MULT_IN  = 2.5
+BBM_MULT_OUT = 2.8
+ICHI_TENKAN  = 9
+ICHI_KIJUN   = 26
+ICHI_SENKOU  = 52
+ST_ATR       = 10
+ST_FACTOR    = 3.0
+RIBBON_ALPHA_OPEN = 85
+RIBBON_ALPHA_FLAT = 70
+RIBBON_ALPHA      = 85
+KUMO_ALPHA        = 85
+PROJECT_BARS      = 3
+MAX_ZONES         = 100
+
+// Conversion LineStyle → plot.linestyle_* (inlinée : `plot(..., linestyle = ...)` exige un input
+// plot_line_style non produisible par une lib — CE10160).
+bbcLS   = bbcLineStyle   == draw.LineStyle.DASHED ? plot.linestyle_dashed : bbcLineStyle   == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+bbmLS   = bbmLineStyle   == draw.LineStyle.DASHED ? plot.linestyle_dashed : bbmLineStyle   == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma7LS   = ma7LineStyle   == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma7LineStyle   == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma20LS  = ma20LineStyle  == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma20LineStyle  == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma50LS  = ma50LineStyle  == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma50LineStyle  == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+ma200LS = ma200LineStyle == draw.LineStyle.DASHED ? plot.linestyle_dashed : ma200LineStyle == draw.LineStyle.DOTTED ? plot.linestyle_dotted : plot.linestyle_solid
+
+// Display constants pré-calculés (gate visibilité côté plot sans ternary sur la valeur).
+bbcDisplay      = bbcEnabled       ? display.all : display.none
+bbmDisplay      = bbmEnabled       ? display.all : display.none
+ma7Display      = ma7Enabled       ? display.all : display.none
+ma20Display     = ma20Enabled      ? display.all : display.none
+ma50Display     = ma50Enabled      ? display.all : display.none
+ma200Display    = ma200Enabled     ? display.all : display.none
+ichiMainDisplay = ichiEnabled and not ichiChikouOnly ? display.all : display.none
+ichiChiDisplay  = ichiEnabled      ? display.all : display.none
+stDisplay       = stEnabled        ? display.all : display.none
+
+// ============================================================
+// Calculs — Bollinger Classique
+// ============================================================
+[bbcBasis, bbcInnerU, bbcInnerL, bbcOuterU, bbcOuterL] = bb.bands(close, BBC_LEN, BBC_MULT_IN, BBC_MULT_OUT)
+bbcUpperFlatRaw    = series.isFlatSeries(bbcOuterU, flatPeriod, flatThreshold)
+bbcUpperClosingRaw = series.isClosingSeries(bbcOuterU, flatPeriod, flatThreshold, true)
+bbcLowerFlatRaw    = series.isFlatSeries(bbcOuterL, flatPeriod, flatThreshold)
+bbcLowerClosingRaw = series.isClosingSeries(bbcOuterL, flatPeriod, flatThreshold, false)
+bbcUpperFlat       = flatEnabled and bbcUpperFlatRaw
+bbcUpperClosing    = flatEnabled and bbcUpperClosingRaw
+bbcLowerFlat       = flatEnabled and bbcLowerFlatRaw
+bbcLowerClosing    = flatEnabled and bbcLowerClosingRaw
+bbcUpperCol        = draw.bandColor(bbcColor, bullColor, bearColor, bbcUpperFlat, bbcUpperClosing, true)
+bbcLowerCol        = draw.bandColor(bbcColor, bullColor, bearColor, bbcLowerFlat, bbcLowerClosing, false)
+bbcIsRibbon        = bbcMode == "ribbon"
+
+// ============================================================
+// Calculs — Bollinger Magique
+// ============================================================
+[bbmBasis, bbmInnerU, bbmInnerL, bbmOuterU, bbmOuterL] = bb.bands(close, BBM_LEN, BBM_MULT_IN, BBM_MULT_OUT)
+bbmUpperFlatRaw    = series.isFlatSeries(bbmOuterU, flatPeriod, flatThreshold)
+bbmUpperClosingRaw = series.isClosingSeries(bbmOuterU, flatPeriod, flatThreshold, true)
+bbmLowerFlatRaw    = series.isFlatSeries(bbmOuterL, flatPeriod, flatThreshold)
+bbmLowerClosingRaw = series.isClosingSeries(bbmOuterL, flatPeriod, flatThreshold, false)
+bbmUpperFlat       = flatEnabled and bbmUpperFlatRaw
+bbmUpperClosing    = flatEnabled and bbmUpperClosingRaw
+bbmLowerFlat       = flatEnabled and bbmLowerFlatRaw
+bbmLowerClosing    = flatEnabled and bbmLowerClosingRaw
+bbmUpperCol        = draw.bandColor(bbmColor, bullColor, bearColor, bbmUpperFlat, bbmUpperClosing, true)
+bbmLowerCol        = draw.bandColor(bbmColor, bullColor, bearColor, bbmLowerFlat, bbmLowerClosing, false)
+bbmIsRibbon        = bbmMode == "ribbon"
+
+// ============================================================
+// Calculs — Moyennes mobiles (basis + bornes de ruban)
+// ============================================================
+[ma7Basis,   ma7U,   ma7L]   = ma.ribbon(close, 7)
+[ma20Basis,  ma20U,  ma20L]  = ma.ribbon(close, 20)
+[ma50Basis,  ma50U,  ma50L]  = ma.ribbon(close, 50)
+[ma200Basis, ma200U, ma200L] = ma.ribbon(close, 200)
+
+// ============================================================
+// Calculs — Ichimoku
+// ============================================================
+[tenkan, kijun, senkouA, senkouB, chikou] = ichi.components(ICHI_TENKAN, ICHI_KIJUN, ICHI_SENKOU)
+senkouUpIsA  = senkouA > senkouB
+senkouAColor = color.new(senkouUpIsA ? bullColor : bearColor, 60)
+senkouBColor = color.new(senkouUpIsA ? bearColor : bullColor, 60)
+kumoColor    = senkouUpIsA ? color.new(color.blue, KUMO_ALPHA) : color.new(color.yellow, KUMO_ALPHA)
+
+// ============================================================
+// Calculs — Supertrend (ligne brisée à chaque changement de direction)
+// ============================================================
+[stLine, stDir] = st.run(ST_ATR, ST_FACTOR)
+stColor         = stDir > 0 ? bullColor : bearColor
+stPrevDir       = stDir[1]
+stDirChanged    = not na(stPrevDir) and stDir != stPrevDir
+stLineBroken    = stDirChanged ? na : stLine
+
+// ============================================================
+// Calculs — Niveaux (Levels) : HTF + intraday Asiatique + Open Range
+// ============================================================
+tfSec        = timeframe.in_seconds()
+showDaily    = tfSec <= timeframe.in_seconds("D")
+showWeekly   = tfSec <= timeframe.in_seconds("W")
+showMonthly  = tfSec <= timeframe.in_seconds("M")
+showIntraday = tfSec < 3600
+
+[pdH, pdL] = levels.previousPeriodHL("D")
+[pwH, pwL] = levels.previousPeriodHL("W")
+[pmH, pmL] = levels.previousPeriodHL("M")
+pdStartBar = levels.previousPeriodStartBar("D")
+pwStartBar = levels.previousPeriodStartBar("W")
+pmStartBar = levels.previousPeriodStartBar("M")
+[athValue, athBar, athBarFound] = levels.ath()
+
+[asianH, asianL, asianStart, asianEnd, asianSeen, asianInS] = levels.sessionHL(asianSessionStr, asianTz, chartTz)
+[orH, orL, orStart, orEnd, _orSeen] = levels.openRange(chartTz)
+
+// ============================================================
+// Calculs — Zones Supply / Demand (FVG calculé pour le filtre 5★, non dessiné)
+// ============================================================
+var array<zone.Zone> sdZones  = array.new<zone.Zone>()
+var array<zone.Zone> fvgZones = array.new<zone.Zone>()
+sd.updateZones(sdZones, signal.detectCMI(), MAX_ZONES)
+fvg.updateZones(fvgZones, MAX_ZONES)
+
+// ============================================================
+// Rendu — Bollinger Classique
+// ============================================================
+bbcOuterBaseCol   = bbcColor
+bbcUpperAccentCol = not bbcIsRibbon and (bbcUpperFlat or bbcUpperClosing) ? bearColor : na
+bbcLowerAccentCol = not bbcIsRibbon and (bbcLowerFlat or bbcLowerClosing) ? bullColor : na
+bbcInnerDisplay   = bbcEnabled and bbcIsRibbon ? display.all : display.none
+bbcInnerCol       = color.new(bbcColor, 50)
+bbcUpperFillAlpha = bbcUpperFlat or bbcUpperClosing ? RIBBON_ALPHA_FLAT : RIBBON_ALPHA_OPEN
+bbcLowerFillAlpha = bbcLowerFlat or bbcLowerClosing ? RIBBON_ALPHA_FLAT : RIBBON_ALPHA_OPEN
+
+pBbcOuterU = plot(bbcOuterU, "BBc outer high", color = bbcOuterBaseCol, linewidth = 1, linestyle = bbcLS, display = bbcDisplay)
+pBbcOuterL = plot(bbcOuterL, "BBc outer low",  color = bbcOuterBaseCol, linewidth = 1, linestyle = bbcLS, display = bbcDisplay)
+plot(bbcOuterU, "BBc accent high", color = bbcUpperAccentCol, linewidth = 2, display = bbcDisplay)
+plot(bbcOuterL, "BBc accent low",  color = bbcLowerAccentCol, linewidth = 2, display = bbcDisplay)
+pBbcInnerU = plot(bbcInnerU, "BBc inner high", color = bbcInnerCol, linewidth = 1, linestyle = bbcLS, display = bbcInnerDisplay, editable = false)
+pBbcInnerL = plot(bbcInnerL, "BBc inner low",  color = bbcInnerCol, linewidth = 1, linestyle = bbcLS, display = bbcInnerDisplay, editable = false)
+fill(pBbcOuterU, pBbcInnerU, color = bbcIsRibbon ? color.new(bbcUpperCol, bbcUpperFillAlpha) : na, title = "BBc ribbon high", display = bbcDisplay)
+fill(pBbcOuterL, pBbcInnerL, color = bbcIsRibbon ? color.new(bbcLowerCol, bbcLowerFillAlpha) : na, title = "BBc ribbon low",  display = bbcDisplay)
+
+// ============================================================
+// Rendu — Bollinger Magique
+// ============================================================
+bbmOuterBaseCol   = bbmColor
+bbmUpperAccentCol = not bbmIsRibbon and (bbmUpperFlat or bbmUpperClosing) ? bearColor : na
+bbmLowerAccentCol = not bbmIsRibbon and (bbmLowerFlat or bbmLowerClosing) ? bullColor : na
+bbmInnerDisplay   = bbmEnabled and bbmIsRibbon ? display.all : display.none
+bbmInnerCol       = color.new(bbmColor, 50)
+bbmUpperFillAlpha = bbmUpperFlat or bbmUpperClosing ? RIBBON_ALPHA_FLAT : RIBBON_ALPHA_OPEN
+bbmLowerFillAlpha = bbmLowerFlat or bbmLowerClosing ? RIBBON_ALPHA_FLAT : RIBBON_ALPHA_OPEN
+
+pBbmOuterU = plot(bbmOuterU, "BBm outer high", color = bbmOuterBaseCol, linewidth = 2, linestyle = bbmLS, display = bbmDisplay)
+pBbmOuterL = plot(bbmOuterL, "BBm outer low",  color = bbmOuterBaseCol, linewidth = 2, linestyle = bbmLS, display = bbmDisplay)
+plot(bbmOuterU, "BBm accent high", color = bbmUpperAccentCol, linewidth = 3, display = bbmDisplay)
+plot(bbmOuterL, "BBm accent low",  color = bbmLowerAccentCol, linewidth = 3, display = bbmDisplay)
+pBbmInnerU = plot(bbmInnerU, "BBm inner high", color = bbmInnerCol, linewidth = 1, linestyle = bbmLS, display = bbmInnerDisplay, editable = false)
+pBbmInnerL = plot(bbmInnerL, "BBm inner low",  color = bbmInnerCol, linewidth = 1, linestyle = bbmLS, display = bbmInnerDisplay, editable = false)
+fill(pBbmOuterU, pBbmInnerU, color = bbmIsRibbon ? color.new(bbmUpperCol, bbmUpperFillAlpha) : na, title = "BBm ribbon high", display = bbmDisplay)
+fill(pBbmOuterL, pBbmInnerL, color = bbmIsRibbon ? color.new(bbmLowerCol, bbmLowerFillAlpha) : na, title = "BBm ribbon low",  display = bbmDisplay)
+
+// ============================================================
+// Rendu — Moyennes mobiles
+// ============================================================
+plot(ma7Basis, "MA7", color = ma7Color, linewidth = 1, linestyle = ma7LS, display = ma7Display)
+pMa7U = plot(ma7U, "", color = na, display = display.none, editable = false)
+pMa7L = plot(ma7L, "", color = na, display = display.none, editable = false)
+fill(pMa7U, pMa7L, color = ma7Mode == "ribbon" ? color.new(ma7Color, RIBBON_ALPHA) : na, title = "MA7 fill", display = ma7Display)
+
+plot(ma20Basis, "MA20", color = ma20Color, linewidth = 1, linestyle = ma20LS, display = ma20Display)
+pMa20U = plot(ma20U, "", color = na, display = display.none, editable = false)
+pMa20L = plot(ma20L, "", color = na, display = display.none, editable = false)
+fill(pMa20U, pMa20L, color = ma20Mode == "ribbon" ? color.new(ma20Color, RIBBON_ALPHA) : na, title = "MA20 fill", display = ma20Display)
+
+plot(ma50Basis, "MA50", color = ma50Color, linewidth = 2, linestyle = ma50LS, display = ma50Display)
+pMa50U = plot(ma50U, "", color = na, display = display.none, editable = false)
+pMa50L = plot(ma50L, "", color = na, display = display.none, editable = false)
+fill(pMa50U, pMa50L, color = ma50Mode == "ribbon" ? color.new(ma50Color, RIBBON_ALPHA) : na, title = "MA50 fill", display = ma50Display)
+
+plot(ma200Basis, "MA200", color = ma200Color, linewidth = 2, linestyle = ma200LS, display = ma200Display)
+pMa200U = plot(ma200U, "", color = na, display = display.none, editable = false)
+pMa200L = plot(ma200L, "", color = na, display = display.none, editable = false)
+fill(pMa200U, pMa200L, color = ma200Mode == "ribbon" ? color.new(ma200Color, RIBBON_ALPHA) : na, title = "MA200 fill", display = ma200Display)
+
+// ============================================================
+// Rendu — Ichimoku
+// ============================================================
+plot(tenkan, "Tenkan", color = ichiTenkanCol, linewidth = 1, display = ichiMainDisplay)
+plot(kijun,  "Kijun",  color = ichiKijunCol,  linewidth = 1, display = ichiMainDisplay)
+pSenkouA = plot(senkouA, "Senkou A", color = senkouAColor, linewidth = 1, offset = ICHI_KIJUN, display = ichiMainDisplay)
+pSenkouB = plot(senkouB, "Senkou B", color = senkouBColor, linewidth = 1, offset = ICHI_KIJUN, display = ichiMainDisplay)
+fill(pSenkouA, pSenkouB, color = kumoColor, title = "Kumo", display = ichiMainDisplay)
+plot(chikou, "Chikou", color = ichiChikouCol, linewidth = 1, offset = -ICHI_KIJUN, display = ichiChiDisplay)
+
+// ============================================================
+// Rendu — Supertrend
+// ============================================================
+plot(stLineBroken, "Supertrend", color = stColor, linewidth = 2, style = plot.style_linebr, display = stDisplay)
+
+// ============================================================
+// Projection MA / BB (dernière barre, refresh live)
+// ============================================================
+ma7BasisProj   = ma.projectSMA(close, 7,   PROJECT_BARS)
+ma20BasisProj  = ma.projectSMA(close, 20,  PROJECT_BARS)
+ma50BasisProj  = ma.projectSMA(close, 50,  PROJECT_BARS)
+ma200BasisProj = ma.projectSMA(close, 200, PROJECT_BARS)
+[bbcBasisProj, bbcInnerUProj, bbcInnerLProj, bbcOuterUProj, bbcOuterLProj] = bb.projectBands(close, BBC_LEN, BBC_MULT_IN, BBC_MULT_OUT, PROJECT_BARS)
+[bbmBasisProj, bbmInnerUProj, bbmInnerLProj, bbmOuterUProj, bbmOuterLProj] = bb.projectBands(close, BBM_LEN, BBM_MULT_IN, BBM_MULT_OUT, PROJECT_BARS)
+
+var array<line> projLines = array.new<line>()
+
+if barstate.islast
+    draw.clearLines(projLines)
+    bi    = bar_index
+    biFut = bi + PROJECT_BARS
+
+    if projectMA
+        draw.drawProjection(ma7Enabled,   bi, ma7Basis,   biFut, ma7BasisProj,   ma7Color,   1, projLines)
+        draw.drawProjection(ma20Enabled,  bi, ma20Basis,  biFut, ma20BasisProj,  ma20Color,  1, projLines)
+        draw.drawProjection(ma50Enabled,  bi, ma50Basis,  biFut, ma50BasisProj,  ma50Color,  2, projLines)
+        draw.drawProjection(ma200Enabled, bi, ma200Basis, biFut, ma200BasisProj, ma200Color, 2, projLines)
+
+    if projectBB
+        draw.drawProjection(bbcEnabled,                 bi, bbcOuterU, biFut, bbcOuterUProj, bbcColor,    1, projLines)
+        draw.drawProjection(bbcEnabled,                 bi, bbcOuterL, biFut, bbcOuterLProj, bbcColor,    1, projLines)
+        draw.drawProjection(bbcEnabled and bbcIsRibbon, bi, bbcInnerU, biFut, bbcInnerUProj, bbcInnerCol, 1, projLines)
+        draw.drawProjection(bbcEnabled and bbcIsRibbon, bi, bbcInnerL, biFut, bbcInnerLProj, bbcInnerCol, 1, projLines)
+        draw.drawProjection(bbmEnabled,                 bi, bbmOuterU, biFut, bbmOuterUProj, bbmColor,    2, projLines)
+        draw.drawProjection(bbmEnabled,                 bi, bbmOuterL, biFut, bbmOuterLProj, bbmColor,    2, projLines)
+        draw.drawProjection(bbmEnabled and bbmIsRibbon, bi, bbmInnerU, biFut, bbmInnerUProj, bbmInnerCol, 1, projLines)
+        draw.drawProjection(bbmEnabled and bbmIsRibbon, bi, bbmInnerL, biFut, bbmInnerLProj, bbmInnerCol, 1, projLines)
+
+// ============================================================
+// Rendu — Niveaux (Levels) : ATH + PD/PW/PM + Asiatique + Open Range
+// ============================================================
+var array<line>  lvlLineArr  = array.new<line>()
+var array<label> lvlLabelArr = array.new<label>()
+
+if barstate.islast
+    draw.clearLines(lvlLineArr)
+    draw.clearLabels(lvlLabelArr)
+
+    // ATH
+    draw.drawLevel(athEnabled, athValue, athBar, athBarFound, athColor, athWidth, athStyle, "ATH", showLabels, true, lvlLineArr, lvlLabelArr)
+
+    // PDH / PDL
+    draw.drawLevel(dailyEnabled and showDaily, pdH, pdStartBar, not na(pdStartBar), dailyColor, dailyWidth, dailyStyle, "PDH", showLabels, true,  lvlLineArr, lvlLabelArr)
+    draw.drawLevel(dailyEnabled and showDaily, pdL, pdStartBar, not na(pdStartBar), dailyColor, dailyWidth, dailyStyle, "PDL", showLabels, false, lvlLineArr, lvlLabelArr)
+
+    // PWH / PWL
+    draw.drawLevel(weeklyEnabled and showWeekly, pwH, pwStartBar, not na(pwStartBar), weeklyColor, weeklyWidth, weeklyStyle, "PWH", showLabels, true,  lvlLineArr, lvlLabelArr)
+    draw.drawLevel(weeklyEnabled and showWeekly, pwL, pwStartBar, not na(pwStartBar), weeklyColor, weeklyWidth, weeklyStyle, "PWL", showLabels, false, lvlLineArr, lvlLabelArr)
+
+    // PMH / PML
+    draw.drawLevel(monthlyEnabled and showMonthly, pmH, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PMH", showLabels, true,  lvlLineArr, lvlLabelArr)
+    draw.drawLevel(monthlyEnabled and showMonthly, pmL, pmStartBar, not na(pmStartBar), monthlyColor, monthlyWidth, monthlyStyle, "PML", showLabels, false, lvlLineArr, lvlLabelArr)
+
+    // Session Asiatique H/L (intraday strict < H1)
+    draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianH, asianStart, asianEnd, false, asianColor, asianWidth, asianStyle, "Asian H", showLabels, true,  lvlLineArr, lvlLabelArr)
+    draw.drawSessionLevel(asianEnabled and showIntraday and asianSeen, asianL, asianStart, asianEnd, false, asianColor, asianWidth, asianStyle, "Asian L", showLabels, false, lvlLineArr, lvlLabelArr)
+
+    // Open Range : H/L figés après 60min, ligne persistante toute la journée chart (extend.right)
+    draw.drawSessionLevel(orEnabled and showIntraday, orH, orStart, orEnd, true, orColor, orWidth, orStyle, "OR H", showLabels, true,  lvlLineArr, lvlLabelArr)
+    draw.drawSessionLevel(orEnabled and showIntraday, orL, orStart, orEnd, true, orColor, orWidth, orStyle, "OR L", showLabels, false, lvlLineArr, lvlLabelArr)
+
+// ============================================================
+// Rendu — Zones Supply / Demand (FVG non dessiné ; sert seulement au filtre 5★)
+// ============================================================
+var array<box>   zoneBoxArr   = array.new<box>()
+var array<label> zoneLabelArr = array.new<label>()
+
+if barstate.islast
+    draw.clearBoxes(zoneBoxArr)
+    draw.clearLabels(zoneLabelArr)
+
+    for z in sdZones
+        isBull   = z.side == zone.ZoneSide.BULL
+        keepBase = (not safeMode) or zone.findOverlappingActiveSameSide(fvgZones, z)
+        draw.drawZoneBox(demandEnabled and isBull       and keepBase, zone.isActive(z), z.leftTime, z.top, z.bottom, demandColor, demandBorderWidth, demandBorderStyle, 85, 40, false, "", zoneBoxArr, zoneLabelArr)
+        draw.drawZoneBox(supplyEnabled and (not isBull) and keepBase, zone.isActive(z), z.leftTime, z.top, z.bottom, supplyColor, supplyBorderWidth, supplyBorderStyle, 85, 40, false, "", zoneBoxArr, zoneLabelArr)
