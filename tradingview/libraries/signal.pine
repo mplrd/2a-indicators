@@ -10,11 +10,17 @@ library("lib_signal", overlay = true)
 // ============================================================
 
 // @enum SignalKind — type de signal détecté sur la barre courante.
-//        Étendre au fur et à mesure des besoins (englobante, open extrême, etc.).
+//        Un membre par sens (bull / bear) et par famille de pattern.
 export enum SignalKind
     NONE
     CMI_BULL
     CMI_BEAR
+    ENGULF_BULL
+    ENGULF_BEAR
+    OPEN_LOW      // open == low  : pas de mèche basse → pression acheteuse (bull)
+    OPEN_HIGH     // open == high : pas de mèche haute → pression vendeuse (bear)
+    COE_BULL      // clôture en extrême bas (n-1) puis open en extrême bas (n) → retournement haussier
+    COE_BEAR      // clôture en extrême haut (n-1) puis open en extrême haut (n) → retournement baissier
 
 // ============================================================
 // CMI — Continuation Movement Indicator (bougie de retournement)
@@ -40,3 +46,50 @@ export detectCMI() =>
     bullCMI = open < ref and close > open and close > high[1] and open != low
     bearCMI = open > ref and close < open and close < low[1]  and open != high
     bullCMI ? SignalKind.CMI_BULL : bearCMI ? SignalKind.CMI_BEAR : SignalKind.NONE
+
+// ============================================================
+// Englobante (engulfing)
+// ============================================================
+
+// @function Détecte une englobante sur la barre courante.
+//           Bullish : la bougie N « avale » entièrement n-1 et clôture au-dessus de sa mèche haute.
+//           Deux formes valides — le signal se déclenche si l'une OU l'autre est vraie :
+//             1. corps englobe tout n-1   : `open <= low[1] and close >= high[1]` (rare, gaps cash)
+//             2. mèches englobent n-1 + clôture au-delà : `low <= low[1] and close > high[1]`
+//           La forme 2 contient la forme 1 (`close > high[1]` implique `high > high[1]`), donc
+//           la condition se réduit à la forme 2. Bearish : miroir.
+// @returns SignalKind (NONE / ENGULF_BULL / ENGULF_BEAR).
+export detectEngulfing() =>
+    bull = low <= low[1]   and close > high[1]
+    bear = high >= high[1] and close < low[1]
+    bull ? SignalKind.ENGULF_BULL : bear ? SignalKind.ENGULF_BEAR : SignalKind.NONE
+
+// ============================================================
+// Open en extrême
+// ============================================================
+
+// @function Détecte une bougie qui ouvre pile sur son extrême (aucune mèche du côté de l'open).
+//           Test strict : `open == low` (pas de mèche basse, pression acheteuse) ou
+//           `open == high` (pas de mèche haute, pression vendeuse). Aucune autre condition.
+//           Mutuellement exclusif avec la CMI, qui exige une mèche côté open.
+// @returns SignalKind (NONE / OPEN_LOW / OPEN_HIGH).
+export detectOpenExtreme() =>
+    open == low  ? SignalKind.OPEN_LOW  : open == high ? SignalKind.OPEN_HIGH : SignalKind.NONE
+
+// ============================================================
+// COE — clôture en extrême puis open en extrême (sens opposé)
+// ============================================================
+
+// @function Détecte une COE sur la barre courante — retournement en 3 temps, confirmé par le break
+//           de la première bougie :
+//           Bull : (1) bougie n-1 ROUGE qui clôture sur son bas (`close[1]==low[1]` et
+//           `open[1]>close[1]`, vendeur épuisé) → (2) bougie n qui OUVRE sur son bas (`open==low`,
+//           reprise acheteuse) → (3) n CASSE le high de la rouge (`close>high[1]`, confirmation).
+//           Bear : miroir (n-1 verte clôture sur son haut, n ouvre sur son haut, n casse le low de
+//           la verte).
+//           NB : la barre n est aussi un OPEN_LOW/OPEN_HIGH (open en extrême).
+// @returns SignalKind (NONE / COE_BULL / COE_BEAR).
+export detectCOE() =>
+    bull = close[1] == low[1]  and open[1] > close[1] and open == low  and close > high[1]
+    bear = close[1] == high[1] and close[1] > open[1] and open == high and close < low[1]
+    bull ? SignalKind.COE_BULL : bear ? SignalKind.COE_BEAR : SignalKind.NONE

@@ -52,6 +52,7 @@ indicators/
 │   ├── zones-SD.pine           # 2Ai Zones (Supply/Demand + FVG)
 │   ├── zones-CMI.pine          # 2Ai CMI Zones (test single-TF, valide la state machine cmi-zone)
 │   ├── zones-MTF.pine          # 2Ai Zones MTF (CMI MTF — scaffold, à wirer)
+│   ├── signals-test.pine       # 2Ai Signals (test) — contrôle visuel des détecteurs lib_signal
 │   └── *.pine                  # Tout autre 2Ai XXX
 ├── docs/
 │   ├── SPECIFICATIONS.md       # Référence du comportement attendu

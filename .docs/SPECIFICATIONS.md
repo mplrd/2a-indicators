@@ -460,3 +460,116 @@ Transparence de fond : 85% / Transparence de bordure : 40% (alignement avec zone
 | Extend Right | bool | false |
 | Delete After Fill | bool | false |
 | FVG History | int | 100 (max 365) |
+
+---
+
+## Bougies de signal (`lib_signal`)
+
+`lib_signal` (Couche 1, pur, sans dessin ni input) centralise la détection des **bougies de signal** :
+des patterns ponctuels sur la barre courante qui déclenchent un setup. Les détecteurs sont
+réutilisables par les indicateurs et par les futures **stratégies** (qui importent le signal pur
+sans embarquer de code de dessin). Chaque détecteur est sans état (entrée = la barre courante et
+son historique implicite, sortie = un `SignalKind`) ; toute validation multi-barres (ex. validation
+3 bougies de la CMI) reste à la charge du consommateur.
+
+`SignalKind` : `NONE`, `CMI_BULL`, `CMI_BEAR`, `ENGULF_BULL`, `ENGULF_BEAR`, `OPEN_LOW`, `OPEN_HIGH`,
+`COE_BULL`, `COE_BEAR`.
+
+### CMI — `detectCMI()`
+
+Cf. section « Detection d'une CMI » (Indicateur 3). Référence SMA 7 de HL2, 4 conditions par sens.
+La CMI exige une mèche du côté de l'open (`open != low` en bull, `open != high` en bear) : une CMI
+ne peut donc **jamais** être un signal « open en extrême ».
+
+### Englobante — `detectEngulfing()`
+
+Bougie dont l'amplitude « avale » entièrement la précédente, avec clôture qui franchit l'extrême opposé.
+Deux formes, le signal se déclenche si **l'une OU l'autre** est vraie :
+
+- **Forme idéale (corps englobe tout n-1)** : le corps de N couvre toute la bougie n-1, mèches
+  incluses — bull : `open <= low[1] and close >= high[1]`. Rare (n'arrive qu'avec un gap, donc sur
+  marchés cash).
+- **Forme mèches + clôture au-delà** : l'amplitude (mèches) de N englobe totalement n-1 **et** la
+  clôture franchit la mèche opposée de n-1 — bull : `low <= low[1] and close > high[1]`.
+
+La 2ᵉ forme **contient** la 1ʳᵉ (si `close > high[1]` alors `high > high[1]` mécaniquement), donc la
+condition retenue se réduit à :
+
+- **`ENGULF_BULL`** : `low <= low[1] and close > high[1]`
+- **`ENGULF_BEAR`** : `high >= high[1] and close < low[1]`
+
+### Open en extrême — `detectOpenExtreme()`
+
+La bougie ouvre **pile sur son extrême**, sans aucune mèche du côté de l'open (test **strict**) :
+
+- **`OPEN_LOW`** : `open == low` — pas de mèche basse → pression acheteuse (bull).
+- **`OPEN_HIGH`** : `open == high` — pas de mèche haute → pression vendeuse (bear).
+
+Aucune autre condition (ni couleur, ni amplitude).
+
+### Clôture-puis-open en extrême (COE) — `detectCOE()`
+
+Pattern **2 barres en 3 temps** — retournement par épuisement puis prise de contrôle inverse,
+**confirmé par le break** de la première bougie :
+
+- **`COE_BULL`** : (1) bougie n-1 **rouge** qui clôture sur son bas (`close[1] == low[1]` et
+  `open[1] > close[1]`, vendeur épuisé) → (2) bougie n qui **ouvre sur son bas** (`open == low`,
+  reprise acheteuse) → (3) n **casse le high de la rouge** (`close > high[1]`, confirmation).
+- **`COE_BEAR`** : miroir — n-1 **verte** clôture sur son haut (`close[1] == high[1]` et
+  `close[1] > open[1]`) → n **ouvre sur son haut** (`open == high`) → n **casse le low de la verte**
+  (`close < low[1]`).
+
+> La barre n d'une COE est aussi un `OPEN_LOW` / `OPEN_HIGH` (open en extrême). Les détecteurs
+> restent indépendants ; ils peuvent marquer la même barre.
+
+> **Rejection / liquidity grab** : explorée puis **abandonnée** (non figée). Elle dépend d'une
+> brique « swing point » (structure de marché) non résolue. Aucun détecteur de rejet n'est livré
+> dans `lib_signal` ; à reprendre de zéro quand la définition du swing point sera tranchée.
+
+---
+
+## Indicateur 5 : 2Ai Signals (test) (`signals-test.pine`)
+
+### Concept
+
+Indicateur de **contrôle visuel** des détecteurs de `lib_signal`. Il n'a pas de logique métier
+propre : il appelle les détecteurs purs et marque les barres correspondantes. Sert à valider
+manuellement chaque signal (instrument / TF / scénario) avant de bâtir les stratégies qui les
+consommeront. Overlay.
+
+### Rendu
+
+**Un label fléché par barre et par sens** (pas un marqueur par signal — on évite les marqueurs
+empilés). Tous les signaux **du même sens** actifs sur la barre sont concaténés dans le **texte**
+d'un seul label : flèche **vers le haut sous la barre** pour le sens **bull**, **vers le bas
+au-dessus** pour le sens **bear**. Le sens est aussi porté par la couleur.
+
+Codes **empilés sur plusieurs lignes** (un par ligne, `\n`), ordre fixe du plus fort au plus faible :
+`COE`, `ENG`, `CMI`, `OE`. Exemple : une barre à la fois CMI bull et englo bull affiche un seul label
+`ENG` / `CMI` (ENG au-dessus de CMI) sous la barre.
+
+| Signal | Code dans le texte | Sens → position |
+|--------|--------------------|-----------------|
+| `CMI_BULL` / `CMI_BEAR` | `CMI` | bull (sous) / bear (au-dessus) |
+| `ENGULF_BULL` / `ENGULF_BEAR` | `ENG` | bull / bear |
+| `OPEN_LOW` / `OPEN_HIGH` | `OE` | bull / bear |
+| `COE_BULL` / `COE_BEAR` | `COE` | bull / bear |
+
+Ordre d'empilement (haut → bas) : `COE`, `ENG`, `CMI`, `OE`.
+
+> Contrainte plateforme : `plotshape(..., text=)` exige un `const string` → impossible d'y
+> concaténer un texte dynamique. On utilise donc `label.new` (texte série). Labels créés
+> uniquement sur barre **confirmée** (`barstate.isconfirmed`) pour éviter le repaint intrabar
+> (les conditions reposent sur `close` / `low` / `open`). Plafond `max_labels_count = 500` (FIFO).
+
+### Settings
+
+| Setting | Type | Defaut | Rôle |
+|---------|------|--------|------|
+| CMI | bool | true | Affiche / masque les marqueurs CMI |
+| Englobantes | bool | true | Affiche / masque les marqueurs englobante |
+| Open en extrême | bool | true | Affiche / masque les marqueurs open-extrême |
+| COE | bool | true | Affiche / masque les marqueurs COE |
+
+> Ces toggles d'affichage sont propres au harnais de test (isoler un signal pendant la validation).
+> Aucun réglage n'altère la détection elle-même.

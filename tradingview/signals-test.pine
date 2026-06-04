@@ -1,0 +1,58 @@
+//@version=6
+// @description 2Ai Signals (test) — controle visuel des detecteurs de `lib_signal` (CMI, englobante,
+//              open en extreme, COE). Appelle les detecteurs purs et marque les barres : un label
+//              fleche par barre et par sens (codes empiles). Aucune logique metier ici, sert a
+//              valider chaque signal manuellement avant de batir les strategies. Overlay.
+indicator("2Ai Signals", shorttitle = "Signals", overlay = true, max_labels_count = 500)
+
+// ============================================================
+// Imports
+// ============================================================
+import mpilard/lib_signal/4 as signal
+
+// ============================================================
+// Inputs
+// ============================================================
+var grp = "Signaux"
+showCMI    = input.bool(true, "CMI",             group = grp)
+showEngulf = input.bool(true, "Englobantes",     group = grp)
+showOpenEx = input.bool(true, "Open en extreme", group = grp)
+showCOE    = input.bool(true, "COE",             group = grp)
+
+// ============================================================
+// Detection
+// ============================================================
+cmi    = signal.detectCMI()
+engulf = signal.detectEngulfing()
+openEx = signal.detectOpenExtreme()
+coe    = signal.detectCOE()
+
+cmiBull = showCMI    and cmi    == signal.SignalKind.CMI_BULL
+cmiBear = showCMI    and cmi    == signal.SignalKind.CMI_BEAR
+engBull = showEngulf and engulf == signal.SignalKind.ENGULF_BULL
+engBear = showEngulf and engulf == signal.SignalKind.ENGULF_BEAR
+oeBull  = showOpenEx and openEx == signal.SignalKind.OPEN_LOW
+oeBear  = showOpenEx and openEx == signal.SignalKind.OPEN_HIGH
+coeBull = showCOE    and coe    == signal.SignalKind.COE_BULL
+coeBear = showCOE    and coe    == signal.SignalKind.COE_BEAR
+
+// ============================================================
+// Rendu — un label fléché par barre et par sens. Tous les signaux du même sens actifs sur la
+//          barre sont empilés (un code par ligne, ordre COE > ENG > CMI > OE). `plotshape(text=)`
+//          exige un const string → on passe par `label.new` (texte série). Labels uniquement sur
+//          barre confirmee (anti-repaint intrabar).
+// ============================================================
+BULL_COL = color.new(color.teal, 0)
+BEAR_COL = color.new(color.red,  0)
+
+// Empile `name` sur une nouvelle ligne si `cond` (ordre d'appel = ordre d'affichage haut→bas).
+addLine(string acc, bool cond, string name) => cond ? (acc == "" ? name : acc + "\n" + name) : acc
+
+bullTxt = addLine(addLine(addLine(addLine("", coeBull, "COE"), engBull, "ENG"), cmiBull, "CMI"), oeBull, "OE")
+bearTxt = addLine(addLine(addLine(addLine("", coeBear, "COE"), engBear, "ENG"), cmiBear, "CMI"), oeBear, "OE")
+
+if barstate.isconfirmed
+    if bullTxt != ""
+        label.new(bar_index, low,  bullTxt, yloc = yloc.belowbar, style = label.style_arrowup,   color = BULL_COL, textcolor = BULL_COL, size = size.tiny)
+    if bearTxt != ""
+        label.new(bar_index, high, bearTxt, yloc = yloc.abovebar, style = label.style_arrowdown, color = BEAR_COL, textcolor = BEAR_COL, size = size.tiny)

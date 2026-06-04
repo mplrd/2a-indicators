@@ -18,7 +18,7 @@
 | `lib-ma` | 1 | **`4`** | 2026-05-29 | `lib-bollinger` v4, `lib-series` v3 | publié (v2 `projectSMA()` ; v3 trilogie zero-lag DEMA/TEMA/ZLEMA + enum `MaMode` + dispatcher `apply(mode, src, length)` ; **v4** : cascade bump des deps lib_series /2 → /3 et lib_bollinger /3 → /4 pour cohérence, aucune signature changée) |
 | `lib-ichimoku` | 1 | **`1`** | 2026-05-18 | — | publié |
 | `lib-supertrend` | 1 | **`1`** | 2026-05-18 | — | publié |
-| `lib-signal` | 1 | **`2`** | 2026-05-21 | — | publié (v1 : `SignalKind` + `detectCMI()` ; v2 : retire la condition de direction de la SMA de référence, garde uniquement `open < ref` / `open > ref`) |
+| `lib-signal` | 1 | **`4`** | 2026-06-04 | — | publié (v1 : `SignalKind` + `detectCMI()` ; v2 : retire la condition de direction de la SMA de référence, garde uniquement `open < ref` / `open > ref` ; **v3** : ajoute 3 détecteurs purs — `detectEngulfing()` (`low<=low[1] and close>high[1]` / miroir), `detectOpenExtreme()` (`open==low`/`open==high`, strict), `detectCOE()` — et les membres d'enum `ENGULF_BULL/BEAR`, `OPEN_LOW/HIGH`, `COE_BULL/BEAR` ; **v4** : `detectCOE()` devient un pattern 3 temps confirmé par le break (n-1 rouge clôture sur son bas → n ouvre sur son bas → n casse le high de la rouge ; miroir bear). **Additif** : les consommateurs existants (`lib_sd`, `lib_cmi_zone`, `zones-CMI`, `zones-MTF`) ne requièrent PAS le bump. Consommé par `signals-test.pine`) |
 | `lib-sd` | 1 | **`2`** | 2026-05-29 | `lib-zone` v2, `lib-signal` v2 | publié. v1 : `updateZones(sdZones, cmiSignal, maxZones)` qui orchestre lifecycle avant création + anti-chaînage + anti-chevauchement par remplacement + cleanup. **v2** : bump du dep `lib-zone` v1 → v2 — Pine v6 traite `lib_zone/1.Zone` et `lib_zone/2.Zone` comme deux types DISTINCTS (CE10123), donc bump cascade obligatoire pour qu'un caller qui a bumpé lib_zone puisse encore appeler `sd.updateZones`. |
 | `lib-fvg` | 1 | **`4`** | 2026-05-29 | `lib-zone` v2 | publié. v1-v3 historique (detect/update/filtre temporel/updateZones). **v4** : bump du dep `lib-zone` v1 → v2 — même raison que lib-sd v2 (CE10123 sur identité cross-version d'UDT). |
 | `lib-gap` | 1 | **`8`** | 2026-05-29 | — | publié. v6 = réécriture portée de l'ancien indicateur après faux gaps sur 24h + crash distance : API `detectDaily()` + `checkFill()` exposées au consommateur, cycle de vie de la box côté indicateur. v7 : UDT `Gap` (top, bottom, dir, leftBarIndex) + `update(maxLookback) → array<Gap>` orchestre tout le cycle de vie (detect via request.security daily + push on day-change + FIFO trim + checkFill par barre, retrait si total / mutation directionnelle si partiel). `detectDaily` et `checkFill` deviennent **privés** (le consommateur n'utilise plus que `update`). **v8** : champ d'UDT `leftBarIndex` → `leftTime` (timestamp ms de la barre adjacente, capturé via `time[1]` au push). Fix du crash "Bar index too far" sur gros historique — l'ancre passe de `bar_index` à `time` (cf. `drawGapBox` v18). Consommé par `levels.pine`. |
@@ -44,7 +44,7 @@ import mpilard/lib_ma/4         as ma
 import mpilard/lib_ichimoku/1   as ichi
 import mpilard/lib_supertrend/1 as st
 import mpilard/lib_zone/2       as zone
-import mpilard/lib_signal/2     as signal
+import mpilard/lib_signal/4     as signal
 import mpilard/lib_sd/2         as sd
 import mpilard/lib_fvg/4        as fvg
 import mpilard/lib_gap/8        as gap
