@@ -70,26 +70,20 @@ p3eff      = useRunner ? qtyTP3 : qtyTP3 + remainder
 validSplit = splitBase <= 100
 
 // ============================================================
-// Type Trade — état pour fill, BE, et cycle de vie du rendu
+// Type Trade — état d'une position DESSINÉE (niveaux + objets graphiques + cycle de vie)
 // ============================================================
 type Trade
-    string id
-    int    issueBar
-    int    leftTime
-    bool   verified     // l'ordre stop a-t-il filé (dans strategy.*trades) ?
-    int    dir          // +1 long, -1 short
-    float  entry
-    float  sl
-    float  tp1
-    float  tp2
-    float  tp3
-    bool   tp1Hit
-    bool   closed
-    box    bxSL
-    box    bxPos
-    line   lnT1
-    line   lnT2
-    bool   slGreyed
+    int   dir          // +1 long, -1 short
+    float entry
+    float sl
+    float tp1
+    float tp2
+    float tp3
+    bool  closed       // figée : SL ou TP3 touché
+    box   bxPos        // box verte entrée→TP3
+    box   bxSL         // box rouge entrée→SL
+    line  lnT1         // ligne pointillée TP1
+    line  lnT2         // ligne pointillée TP2
 
 // ============================================================
 // État persistant (reset au changement de jour chart)
@@ -131,31 +125,17 @@ orReady = orSeen and not na(orEnd) and not na(R) and R > 0 and time >= orEnd
 mkBox(int lt, float a, float b, color col) => box.new(left = lt, top = math.max(a, b), right = lt + oneBarMs, bottom = math.min(a, b), xloc = xloc.bar_time, border_color = color.new(col, 40), bgcolor = color.new(col, 85), border_width = 1, extend = extend.none, force_overlay = true)
 mkLine(int lt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = lt + oneBarMs, y2 = y, xloc = xloc.bar_time, color = color.new(col, 20), width = 1, style = line.style_dashed, force_overlay = true)
 
-// Dessine la position d'un signal sur 3 bougies (statique pour l'instant ; extension jusqu'à fermeture → plus tard).
-//   box verte entrée→TP3, box rouge entrée→SL, lignes pointillées TP1/TP2. Ancrée à la bougie courante (la flèche).
-drawPos(float entry, float sl, float tp1, float tp2, float tp3) =>
-    lt = time
-    rt = time + 3 * oneBarMs
-    box.new(lt, math.max(entry, tp3), rt, math.min(entry, tp3), xloc = xloc.bar_time, border_color = color.new(COL_TP, 40), bgcolor = color.new(COL_TP, 85), border_width = 1, force_overlay = true)
-    box.new(lt, math.max(entry, sl),  rt, math.min(entry, sl),  xloc = xloc.bar_time, border_color = color.new(COL_SL, 40), bgcolor = color.new(COL_SL, 85), border_width = 1, force_overlay = true)
-    line.new(lt, tp1, rt, tp1, xloc = xloc.bar_time, color = color.new(COL_TP, 20), width = 1, style = line.style_dashed, force_overlay = true)
-    line.new(lt, tp2, rt, tp2, xloc = xloc.bar_time, color = color.new(COL_TP, 20), width = 1, style = line.style_dashed, force_overlay = true)
+// Ouvre une position DESSINÉE et la tracke dans `trades` : box verte entrée→TP3, box rouge entrée→SL,
+//   lignes pointillées TP1/TP2 (selon répartition). Ancrée à la bougie courante (la flèche) ;
+//   étendue puis figée barre par barre par la boucle de vie des positions (bas du fichier).
+openPos(int dir, float entry, float sl, float tp1, float tp2, float tp3) =>
+    bxP = mkBox(time, entry, tp3, COL_TP)
+    bxS = mkBox(time, entry, sl,  COL_SL)
+    l1  = qtyTP1 > 0 ? mkLine(time, tp1, COL_TP) : na
+    l2  = qtyTP2 > 0 ? mkLine(time, tp2, COL_TP) : na
+    array.push(trades, Trade.new(dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
 
-// Le trade a-t-il filé (ouvert ou déjà clôturé) ?
-filledNow(string id) =>
-    bool f = false
-    if strategy.opentrades > 0
-        for i = 0 to strategy.opentrades - 1
-            if strategy.opentrades.entry_id(i) == id
-                f := true
-                break
-    if not f and strategy.closedtrades > 0
-        fromIdx = math.max(0, strategy.closedtrades - 5)
-        for i = strategy.closedtrades - 1 to fromIdx
-            if strategy.closedtrades.entry_id(i) == id
-                f := true
-                break
-    f
+// (helper filledNow retiré — plus de moteur d'ordres à ce stade)
 
 // Marqueurs de signal (série réinitialisée chaque barre) : niveau d'entrée potentiel par sens.
 float dbgTrigUp = na   // bulle LONG : extrême (haut) de la bougie de signal
@@ -185,62 +165,8 @@ if barstate.isconfirmed
         cassuredUp   := false
         cassuredDn   := false
 
-    // --- 1. Vérification du fill / annulation + gestion des trades ouverts ---
-    rightT = time + oneBarMs
-    for t in trades
-        // L'ordre stop persiste jusqu'à ce qu'il file OU soit annulé en fin de journée (cf. bloc dayChange).
-        if not t.verified
-            if filledNow(t.id)
-                t.verified  := true
-                cntFilled   += 1
-                tradesToday += 1   // le plafond/jour compte les ENTRÉES réelles, pas les placements
-                dbgFill     := t.entry
-                // Ancrage sur la bougie de FILL (= entrée réelle), pas sur la bougie déclencheuse.
-                // L'ordre stop file après le déclencheur → sinon la box est décalée à gauche du trade.
-                t.bxSL     := mkBox(time, t.entry, t.sl,  COL_SL)
-                t.bxPos    := mkBox(time, t.entry, t.tp3, COL_TP)
-                t.lnT1     := qtyTP1 > 0 ? mkLine(time, t.tp1, COL_TP) : na
-                t.lnT2     := qtyTP2 > 0 ? mkLine(time, t.tp2, COL_TP) : na
-
-        if t.verified and not t.closed
-            hitT1 = t.dir == 1 ? high >= t.tp1 : low <= t.tp1
-            hitT3 = t.dir == 1 ? high >= t.tp3 : low <= t.tp3
-
-            // Passage à BE au TP1 (toggle) : on déplace le stop du reliquat au prix d'entrée.
-            if not t.tp1Hit and hitT1
-                t.tp1Hit := true
-                if moveToBE
-                    if qtyTP2 > 0
-                        strategy.exit(t.id + "-2", from_entry = t.id, qty_percent = qtyTP2, limit = t.tp2, stop = t.entry)
-                    if p3eff > 0
-                        strategy.exit(t.id + "-3", from_entry = t.id, qty_percent = p3eff, limit = t.tp3, stop = t.entry)
-                    if runnerPct > 0
-                        strategy.exit(t.id + "-r", from_entry = t.id, qty_percent = runnerPct, stop = t.entry)
-
-            // Stop courant : SL d'origine, ou BE après TP1 si le toggle est actif.
-            stopNow = (t.tp1Hit and moveToBE) ? t.entry : t.sl
-            stopHit = t.dir == 1 ? low <= stopNow : high >= stopNow
-            if stopHit or (runnerPct == 0 and hitT3)
-                t.closed := true
-
-            // Tous les éléments partagent le MÊME bord droit. La box SL passe juste en gris quand
-            // elle n'est plus le risque vivant (BE atteint ou sortie).
-            if ((t.tp1Hit and moveToBE) or t.closed) and not t.slGreyed
-                box.set_bgcolor(t.bxSL, color.new(COL_GREY, 88))
-                box.set_border_color(t.bxSL, color.new(COL_GREY, 50))
-                t.slGreyed := true
-            box.set_right(t.bxSL, rightT)
-            box.set_right(t.bxPos, rightT)
-            if not na(t.lnT1)
-                line.set_x2(t.lnT1, rightT)
-            if not na(t.lnT2)
-                line.set_x2(t.lnT2, rightT)
-
-    // Purge des trades clôturés / annulés (rendu déjà figé).
-    if array.size(trades) > 0
-        for i = array.size(trades) - 1 to 0
-            if array.get(trades, i).closed
-                array.remove(trades, i)
+    // (Vie des positions dessinées — extension + fermeture SL/TP3 — gérée en bas, pilotée par les flèches.
+    //  Pas de moteur d'ordres ici : ce sera l'étape suivante.)
 
     // --- 2. Détection des déclencheurs (OR figé) ---
     if orReady
@@ -351,10 +277,38 @@ breakDn = not na(dbgTrigDn[1]) and (breakOnClose ? close < dbgTrigDn[1] : low  <
 plotshape(breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
 plotshape(breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
 
-// DESSIN DE LA POSITION à chaque flèche (long sur breakUp, short sur breakDn).
-//   Entrée = close de la bougie-flèche si validation en clôture, sinon le niveau cassé (extrême de la bulle).
-//   SL/TP = ceux du signal, déjà calculés sur la bougie-bulle (cassure = niveau range ; réintég = mèche). Lus en [1].
-if breakUp
-    drawPos(breakOnClose ? close : dbgTrigUp[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
-if breakDn
-    drawPos(breakOnClose ? close : dbgTrigDn[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+// VIE DE LA POSITION dessinée — uniquement sur bougie fermée (pas de doublon en temps réel).
+//   À chaque flèche on ouvre une position : entrée = close de la bougie-flèche si validation en
+//   clôture, sinon le niveau cassé (extrême de la bulle) ; SL/TP du signal figés sur la bulle (lus en [1]).
+if barstate.isconfirmed
+    if breakUp
+        openPos(1,  breakOnClose ? close : dbgTrigUp[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+    if breakDn
+        openPos(-1, breakOnClose ? close : dbgTrigDn[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+
+    // Chaque barre fermée : étendre les positions ouvertes (même bord droit) et FIGER dès que le prix
+    //   touche le SL (perdu → box position grisée) ou le TP3 (gagné → box SL grisée).
+    if array.size(trades) > 0
+        rx = time + oneBarMs
+        for t in trades
+            if not t.closed
+                box.set_right(t.bxPos, rx)
+                box.set_right(t.bxSL, rx)
+                if not na(t.lnT1)
+                    line.set_x2(t.lnT1, rx)
+                if not na(t.lnT2)
+                    line.set_x2(t.lnT2, rx)
+                slHit  = t.dir == 1 ? low  <= t.sl  : high >= t.sl
+                tp3Hit = t.dir == 1 ? high >= t.tp3 : low  <= t.tp3
+                if slHit
+                    t.closed := true
+                    box.set_bgcolor(t.bxPos, color.new(COL_GREY, 90))
+                    box.set_border_color(t.bxPos, color.new(COL_GREY, 60))
+                else if tp3Hit
+                    t.closed := true
+                    box.set_bgcolor(t.bxSL, color.new(COL_GREY, 90))
+                    box.set_border_color(t.bxSL, color.new(COL_GREY, 60))
+        // Purge des positions figées (boxes déjà dessinées, gelées à leur dernier bord droit).
+        for i = array.size(trades) - 1 to 0
+            if array.get(trades, i).closed
+                array.remove(trades, i)
