@@ -17,9 +17,10 @@
 strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
   pyramiding = 100,                                     // borne haute ; le vrai plafond/jour est `tradesMax`
   default_qty_type = strategy.percent_of_equity,
-  default_qty_value = 1.0,                              // ignoré : la taille est calculée par risque (qty explicite)
+  default_qty_value = 1.0,                              // fallback ; écrasé par la qty explicite (sizing par risque)
   initial_capital = 10000,
   calc_on_every_tick = false,
+  process_orders_on_close = true,                       // entrée au marché à la CLÔTURE de la bougie-flèche
   max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 import mpilard/lib_levels/12 as levels
@@ -81,6 +82,7 @@ validSplit = splitBase <= 100
 // Type Trade — état d'une position DESSINÉE (niveaux + objets graphiques + cycle de vie)
 // ============================================================
 type Trade
+    string id          // id ordre moteur (strategy.entry / strategy.exit)
     int   dir          // +1 long, -1 short
     float entry
     float sl
@@ -137,12 +139,18 @@ mkLine(int lt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = lt + oneBar
 // Ouvre une position DESSINÉE et la tracke dans `trades` : box verte entrée→TP3, box rouge entrée→SL,
 //   lignes pointillées TP1/TP2 (selon répartition). Ancrée à la bougie courante (la flèche) ;
 //   étendue puis figée barre par barre par la boucle de vie des positions (bas du fichier).
-openPos(int dir, float entry, float sl, float tp1, float tp2, float tp3) =>
+openPos(string id, int dir, float entry, float sl, float tp1, float tp2, float tp3) =>
     bxP = mkBox(time, entry, tp3, COL_TP)
     bxS = mkBox(time, entry, sl,  COL_SL)
     l1  = qtyTP1 > 0 ? mkLine(time, tp1, COL_TP) : na
     l2  = qtyTP2 > 0 ? mkLine(time, tp2, COL_TP) : na
-    array.push(trades, Trade.new(dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
+    array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
+
+// Taille par RISQUE : qty telle que la perte au SL (distance entrée↔SL × valeur du point) = riskPct% de l'equity.
+//   Retourne 0 si la distance est nulle (setup dégénéré → on n'ouvre pas). Écrase l'Order size des Propriétés.
+riskQty(float entry, float sl) =>
+    d = math.abs(entry - sl)
+    d > 0 ? (strategy.equity * riskPct / 100.0) / (d * syminfo.pointvalue) : 0.0
 
 // Estompe une position FERMÉE (transparence accrue) pour la faire reculer visuellement.
 //   SL : reste GRIS si le trade a atteint BE (slGreyed) — sortie à BE = non-événement discret ;
@@ -310,13 +318,19 @@ if barstate.isconfirmed
     // Garde-fou : on rejette le setup si le TP1 est déjà DERRIÈRE l'entrée (entrée au-delà de la 1re cible).
     if breakUp and tradesToday < tradesMax and array.size(trades) < maxOpen
         eUp = breakOnClose ? close : dbgTrigUp[1]
-        if sigTP1[1] > eUp                               // TP1 devant l'entrée (long) → trade valide
-            openPos(1, eUp, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+        qUp = riskQty(eUp, sigSL[1])
+        if sigTP1[1] > eUp and qUp > 0                   // TP1 devant l'entrée (long) + taille calculable
+            eid = str.tostring(bar_index) + "L"
+            openPos(eid, 1, eUp, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+            strategy.entry(eid, strategy.long, qty = qUp)   // marché à la clôture, taille par risque
             tradesToday += 1
     if breakDn and tradesToday < tradesMax and array.size(trades) < maxOpen
         eDn = breakOnClose ? close : dbgTrigDn[1]
-        if sigTP1[1] < eDn                               // TP1 devant l'entrée (short) → trade valide
-            openPos(-1, eDn, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+        qDn = riskQty(eDn, sigSL[1])
+        if sigTP1[1] < eDn and qDn > 0                   // TP1 devant l'entrée (short) + taille calculable
+            eid = str.tostring(bar_index) + "S"
+            openPos(eid, -1, eDn, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+            strategy.entry(eid, strategy.short, qty = qDn)
             tradesToday += 1
 
     // Chaque barre fermée : étendre les positions ouvertes (même bord droit), armer le BE (anticipé
@@ -335,6 +349,7 @@ if barstate.isconfirmed
                 // Stop courant : SL d'origine, ou BE (= entrée) une fois la position sécurisée (slGreyed).
                 //   BE armé à la barre QUI SUIT le déclencheur (enregistré en fin de barre, après le test du stop).
                 stopNow = t.slGreyed ? t.entry : t.sl
+                strategy.exit("x" + t.id, from_entry = t.id, stop = stopNow, limit = t.tp3)   // sortie moteur : SL/BE ou TP3 (taille pleine)
                 stopHit = t.dir == 1 ? low  <= stopNow : high >= stopNow
                 tp3Hit  = t.dir == 1 ? high >= t.tp3   : low  <= t.tp3
                 if stopHit or tp3Hit
