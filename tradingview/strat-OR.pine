@@ -32,20 +32,21 @@ orTz      = input.string("Europe/Paris", "TZ Open Range",     group = GRP_GEN, t
 tradesMax = input.int(3,                 "Trades max / jour",  group = GRP_GEN, minval = 1,    maxval = 10)
 riskPct   = input.float(1.0,             "Risque par trade (%)", group = GRP_GEN, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
 debug     = input.bool(false,            "Debug (afficher les bulles de signal)", group = GRP_GEN, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
+breakOnClose = input.bool(false,         "Cassure de bougie validée en CLÔTURE (sinon mèche/séance)", group = GRP_GEN, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
 
-var string GRP_SET = "Setups"
-enableBreak  = input.bool(true, "Cassure (continuation)", group = GRP_SET)
-enableReint  = input.bool(true, "Réintégration (fade)",   group = GRP_SET)
-breakOnClose = input.bool(false, "Cassure validée en CLÔTURE (sinon pendant la bougie / mèche)", group = GRP_SET, tooltip = "Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
+var string GRP_BREAK = "Cassure"
+enableBreak = input.bool(true,  "Activer la cassure (continuation)", group = GRP_BREAK)
+tpBreak1    = input.float(1.0,  "TP1 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
+tpBreak2    = input.float(2.0,  "TP2 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
+tpBreak3    = input.float(5.0,  "TP3 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
+slBreakPct  = input.float(55.0, "SL (% range)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "% du range depuis la borne cassée. Non capé : >100 autorisé.")
 
-var string GRP_LVL = "Multiples SL / TP"
-tpBreak1    = input.float(1.0,  "TP1 cassure (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
-tpBreak2    = input.float(2.0,  "TP2 cassure (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
-tpBreak3    = input.float(5.0,  "TP3 cassure (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
-tpReint1    = input.float(0.5,  "TP1 réintég (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1, tooltip = "TP2 réintégration = borne opposée du range (fixe).")
-tpReint3    = input.float(2.0,  "TP3 réintég (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
-slBreakPct  = input.float(55.0, "SL cassure (% range)",  group = GRP_LVL, minval = 0,   step = 1,   tooltip = "% du range depuis la borne cassée. 55 = défaut. Non capé : >100 autorisé (SL au-delà de la borne opposée).")
-slReintWick = input.float(100.0, "SL réintég (% mèche)",  group = GRP_LVL, minval = 0,   step = 5,   tooltip = "Fraction de la mèche de l'extrême, ajoutée au-delà de celui-ci. Non capé.")
+var string GRP_REINT = "Réintégration"
+enableReint = input.bool(true,   "Activer la réintégration (fade)", group = GRP_REINT)
+tpReint1    = input.float(0.5,   "TP1 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1)
+tpReint2    = input.float(1.0,   "TP2 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1, tooltip = "1.0 = borne opposée du range (l'ancien défaut figé).")
+tpReint3    = input.float(2.0,   "TP3 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1)
+slReintWick = input.float(100.0, "SL (% mèche)", group = GRP_REINT, minval = 0, step = 5, tooltip = "Fraction de la mèche de l'extrême de la bougie de réintégration, ajoutée au-delà (body si open en extrême). Non capé.")
 
 var string GRP_POS = "Répartition & gestion"
 qtyTP1    = input.int(50,   "Sortie TP1 (%)", group = GRP_POS, minval = 0, maxval = 100, tooltip = "TP1+TP2+TP3 doivent totaliser ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
@@ -303,7 +304,7 @@ if barstate.isconfirmed
             upW = high - math.max(open, close)               // mèche HAUTE de la bougie de réintégration (la bulle)
             tSL := high + (slReintWick / 100.0) * (upW > 0 ? upW : math.abs(open - close))   // SL au-dessus (body si open en extrême)
             tTP1   := orH - tpReint1 * R
-            tTP2   := orL
+            tTP2   := orH - tpReint2 * R                     // 1.0 = orL (borne opposée), comme l'ancien figé
             tTP3   := orH - tpReint3 * R
             cassuredUp := false                              // ré-armé : il faudra une NOUVELLE cassure
             outAbove   := false
@@ -313,7 +314,7 @@ if barstate.isconfirmed
             dnW = math.min(open, close) - low                // mèche BASSE de la bougie de réintégration (la bulle)
             tSL := low - (slReintWick / 100.0) * (dnW > 0 ? dnW : math.abs(open - close))    // SL en-dessous (body si open en extrême)
             tTP1   := orL + tpReint1 * R
-            tTP2   := orH
+            tTP2   := orL + tpReint2 * R                     // 1.0 = orH (borne opposée), comme l'ancien figé
             tTP3   := orL + tpReint3 * R
             cassuredDn := false
             outBelow   := false
