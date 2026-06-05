@@ -50,11 +50,16 @@ tpReint3    = input.float(2.0,   "TP3 (×range)", group = GRP_REINT, minval = 0.
 slReintWick = input.float(100.0, "SL (% mèche)", group = GRP_REINT, minval = 0, step = 5, tooltip = "Fraction de la mèche de l'extrême de la bougie de réintégration, ajoutée au-delà (body si open en extrême). Non capé.")
 
 var string GRP_POS = "Répartition & gestion"
+// Modes de break-even (const strings : servent aux options input.string ET aux comparaisons)
+BE_NONE  = "Aucune"
+BE_TP1   = "Au TP1"
+BE_EARLY = "Anticipée (% prix)"
 qtyTP1    = input.int(50,   "Sortie TP1 (%)", group = GRP_POS, minval = 0, maxval = 100, tooltip = "TP1+TP2+TP3 doivent totaliser ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
 qtyTP2    = input.int(20,   "Sortie TP2 (%)", group = GRP_POS, minval = 0, maxval = 100)
 qtyTP3    = input.int(20,   "Sortie TP3 (%)", group = GRP_POS, minval = 0, maxval = 100)
 useRunner = input.bool(true, "Runner (reliquat, sort au stop)", group = GRP_POS, tooltip = "Si off, le reliquat est ajouté à TP3.")
-moveToBE  = input.bool(true, "Passage à BE au TP1",             group = GRP_POS)
+beMode     = input.string(BE_TP1, "Break-even", options = [BE_NONE, BE_TP1, BE_EARLY], group = GRP_POS, tooltip = "Aucune : stop fixe au SL. Au TP1 : BE quand le prix atteint TP1. Anticipée : BE quand le prix a parcouru le % ci-dessous en notre faveur (avant TP1).")
+earlyBEPct = input.float(1.0, "BE anticipée — % prix dans notre sens", group = GRP_POS, minval = 0.1, step = 0.1, tooltip = "Utilisé uniquement en mode « Anticipée ». % du prix d'entrée parcouru en notre faveur déclenchant le BE.")
 
 // ============================================================
 // Constantes & couleurs
@@ -82,9 +87,8 @@ type Trade
     float tp1
     float tp2
     float tp3
-    bool  tp1Hit       // TP1 atteint → BE armé (stop ramené à l'entrée)
     bool  closed       // figée : SL/BE ou TP3 touché
-    bool  slGreyed     // box SL déjà grisée (BE atteint ou sortie)
+    bool  slGreyed     // BE armé : stop ramené à l'entrée + box SL grisée
     box   bxPos        // box verte entrée→TP3
     box   bxSL         // box rouge entrée→SL
     line  lnT1         // ligne pointillée TP1
@@ -138,7 +142,7 @@ openPos(int dir, float entry, float sl, float tp1, float tp2, float tp3) =>
     bxS = mkBox(time, entry, sl,  COL_SL)
     l1  = qtyTP1 > 0 ? mkLine(time, tp1, COL_TP) : na
     l2  = qtyTP2 > 0 ? mkLine(time, tp2, COL_TP) : na
-    array.push(trades, Trade.new(dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, tp1Hit = false, closed = false, slGreyed = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
+    array.push(trades, Trade.new(dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
 
 // Estompe une position FERMÉE (transparence accrue) pour la faire reculer visuellement.
 //   SL : reste GRIS si le trade a atteint BE (slGreyed) — sortie à BE = non-événement discret ;
@@ -310,8 +314,8 @@ if barstate.isconfirmed
         openPos(-1, breakOnClose ? close : dbgTrigDn[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
         tradesToday += 1
 
-    // Chaque barre fermée : étendre les positions ouvertes (même bord droit), passer à BE au TP1
-    //   (stop ramené à l'entrée, box SL grisée — réservé à une position VIVANTE), et FIGER au stop
+    // Chaque barre fermée : étendre les positions ouvertes (même bord droit), armer le BE (anticipé
+    //   % prix OU au TP1 → stop à l'entrée, box SL grisée — réservé à une position VIVANTE), et FIGER au stop
     //   courant (SL/BE) ou au TP3 → la position fermée est ESTOMPÉE (couleurs gardées, plus transparentes).
     if array.size(trades) > 0
         rx = time + oneBarMs
@@ -323,21 +327,23 @@ if barstate.isconfirmed
                     line.set_x2(t.lnT1, rx)
                 if not na(t.lnT2)
                     line.set_x2(t.lnT2, rx)
-                // Stop courant : SL d'origine, ou BE (= entrée) une fois TP1 atteint si le toggle est actif.
-                //   BE armé à la barre QUI SUIT TP1 (TP1 enregistré en fin de barre, après le test du stop).
-                stopNow = (t.tp1Hit and moveToBE) ? t.entry : t.sl
+                // Stop courant : SL d'origine, ou BE (= entrée) une fois la position sécurisée (slGreyed).
+                //   BE armé à la barre QUI SUIT le déclencheur (enregistré en fin de barre, après le test du stop).
+                stopNow = t.slGreyed ? t.entry : t.sl
                 stopHit = t.dir == 1 ? low  <= stopNow : high >= stopNow
                 tp3Hit  = t.dir == 1 ? high >= t.tp3   : low  <= t.tp3
                 if stopHit or tp3Hit
                     t.closed := true
                     fadePos(t)                                   // fermé → on estompe ; le gris reste réservé au BE en cours
-                else if not t.tp1Hit and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
-                    // TP1 atteint sans sortie ce bar → passage à BE : box SL grisée (risque éteint, position VIVANTE)
-                    t.tp1Hit := true
-                    if moveToBE and not t.slGreyed
+                else if not t.slGreyed
+                    // Pas encore sécurisée : on arme le BE selon le MODE choisi (anticipé = avant TP1).
+                    beEarlyLvl = t.dir == 1 ? t.entry * (1 + earlyBEPct / 100.0) : t.entry * (1 - earlyBEPct / 100.0)
+                    beEarly    = beMode == BE_EARLY and (t.dir == 1 ? high >= beEarlyLvl : low <= beEarlyLvl)
+                    beAtTp1    = beMode == BE_TP1   and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
+                    if beEarly or beAtTp1
+                        t.slGreyed := true                       // BE armé → box SL grisée (risque éteint, position VIVANTE)
                         box.set_bgcolor(t.bxSL, color.new(COL_GREY, 85))
                         box.set_border_color(t.bxSL, color.new(COL_GREY, 45))
-                        t.slGreyed := true
         // Purge des positions figées (boxes déjà dessinées, gelées à leur dernier bord droit).
         for i = array.size(trades) - 1 to 0
             if array.get(trades, i).closed
