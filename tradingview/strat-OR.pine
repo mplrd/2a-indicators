@@ -30,6 +30,7 @@ import mpilard/lib_levels/12 as levels
 var string GRP_GEN = "Général"
 orTz      = input.string("Europe/Paris", "TZ Open Range",     group = GRP_GEN, tooltip = "TZ IANA définissant le 'minuit' de l'Open Range (Pine n'expose pas la TZ du chart).")
 tradesMax = input.int(3,                 "Trades max / jour",  group = GRP_GEN, minval = 1,    maxval = 10)
+maxOpen   = input.int(2,                 "Positions max en cours", group = GRP_GEN, minval = 1, maxval = 10, tooltip = "Positions ouvertes simultanément autorisées (renfort). Au-delà, le setup est ignoré.")
 riskPct   = input.float(1.0,             "Risque par trade (%)", group = GRP_GEN, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
 debug     = input.bool(false,            "Debug (afficher les bulles de signal)", group = GRP_GEN, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
 breakOnClose = input.bool(false,         "Cassure de bougie validée en CLÔTURE (sinon mèche/séance)", group = GRP_GEN, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
@@ -170,7 +171,7 @@ float sigTP3 = na
 // Logique — uniquement sur bougie fermée (pas de repaint)
 // ============================================================
 if barstate.isconfirmed
-    // --- Nouveau jour : reset de l'état de DÉTECTION (les ordres/positions seront gérés à l'étape suivante).
+    // --- Nouveau jour : reset de l'état de DÉTECTION + du compteur de trades du jour.
     if dayChange
         outAbove     := false
         outBelow     := false
@@ -182,6 +183,7 @@ if barstate.isconfirmed
         brokeDnState := false
         cassuredUp   := false
         cassuredDn   := false
+        tradesToday  := 0
 
     // (Vie des positions dessinées — extension + fermeture SL/TP3 — gérée en bas, pilotée par les flèches.
     //  Pas de moteur d'ordres ici : ce sera l'étape suivante.)
@@ -299,10 +301,14 @@ plotshape(breakDn, "Breakdown", style = shape.arrowdown, location = location.abo
 //   À chaque flèche on ouvre une position : entrée = close de la bougie-flèche si validation en
 //   clôture, sinon le niveau cassé (extrême de la bulle) ; SL/TP du signal figés sur la bulle (lus en [1]).
 if barstate.isconfirmed
-    if breakUp
+    // Plafonds : `tradesMax` trades ouverts/jour, `maxOpen` positions simultanées (renfort).
+    //   array.size(trades) = positions encore ouvertes (les fermées sont purgées plus bas).
+    if breakUp and tradesToday < tradesMax and array.size(trades) < maxOpen
         openPos(1,  breakOnClose ? close : dbgTrigUp[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
-    if breakDn
+        tradesToday += 1
+    if breakDn and tradesToday < tradesMax and array.size(trades) < maxOpen
         openPos(-1, breakOnClose ? close : dbgTrigDn[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+        tradesToday += 1
 
     // Chaque barre fermée : étendre les positions ouvertes (même bord droit), passer à BE au TP1
     //   (stop ramené à l'entrée, box SL grisée — réservé à une position VIVANTE), et FIGER au stop
