@@ -32,6 +32,12 @@ var string GRP_GEN = "Général"
 orTz      = input.string("Europe/Paris", "TZ Open Range",     group = GRP_GEN, tooltip = "TZ IANA définissant le 'minuit' de l'Open Range (Pine n'expose pas la TZ du chart).")
 tradesMax = input.int(3,                 "Trades max / jour",  group = GRP_GEN, minval = 1,    maxval = 10)
 maxOpen   = input.int(2,                 "Positions max en cours", group = GRP_GEN, minval = 1, maxval = 10, tooltip = "Positions ouvertes simultanément autorisées (renfort). Au-delà, le setup est ignoré.")
+// Sens / hedge (const strings : options input.string + comparaisons)
+DIR_BOTH  = "Les deux sens (hedge)"
+DIR_LONG  = "Long seul"
+DIR_SHORT = "Short seul"
+DIR_NET   = "Sens unique (net, anti-hedge)"
+dirMode   = input.string(DIR_BOTH, "Sens / hedge", options = [DIR_BOTH, DIR_LONG, DIR_SHORT, DIR_NET], group = GRP_GEN, tooltip = "Les deux sens (hedge) : on DESSINE les deux ; ⚠ le moteur n'a qu'une position nette (il nette les sens opposés) → backtest fiable surtout en Long/Short/Net. Long/Short seul : un seul sens. Sens unique (net) : refuse un setup opposé à la position en cours.")
 riskPct   = input.float(1.0,             "Risque par trade (%)", group = GRP_GEN, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
 debug     = input.bool(false,            "Debug (afficher les bulles de signal)", group = GRP_GEN, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
 breakOnClose = input.bool(false,         "Cassure de bougie validée en CLÔTURE (sinon mèche/séance)", group = GRP_GEN, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
@@ -316,7 +322,12 @@ if barstate.isconfirmed
     // Plafonds : `tradesMax` trades ouverts/jour, `maxOpen` positions simultanées (renfort).
     //   array.size(trades) = positions encore ouvertes (les fermées sont purgées plus bas).
     // Garde-fou : on rejette le setup si le TP1 est déjà DERRIÈRE l'entrée (entrée au-delà de la 1re cible).
-    if breakUp and tradesToday < tradesMax and array.size(trades) < maxOpen
+    // Sens / hedge (cf. `dirMode`). netDir = sens des positions ouvertes (+1 long / -1 short, 0 si aucune) ;
+    //   ne sert qu'au mode « net » (refuser un setup opposé à la position en cours).
+    netDir = array.size(trades) > 0 ? array.get(trades, 0).dir : 0
+    allowLong  = dirMode != DIR_SHORT and (dirMode != DIR_NET or netDir >= 0)
+    allowShort = dirMode != DIR_LONG  and (dirMode != DIR_NET or netDir <= 0)
+    if breakUp and tradesToday < tradesMax and array.size(trades) < maxOpen and allowLong
         eUp = breakOnClose ? close : dbgTrigUp[1]
         qUp = riskQty(eUp, sigSL[1])
         if sigTP1[1] > eUp and qUp > 0                   // TP1 devant l'entrée (long) + taille calculable
@@ -324,7 +335,7 @@ if barstate.isconfirmed
             openPos(eid, 1, eUp, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
             strategy.entry(eid, strategy.long, qty = qUp)   // marché à la clôture, taille par risque
             tradesToday += 1
-    if breakDn and tradesToday < tradesMax and array.size(trades) < maxOpen
+    if breakDn and tradesToday < tradesMax and array.size(trades) < maxOpen and allowShort
         eDn = breakOnClose ? close : dbgTrigDn[1]
         qDn = riskQty(eDn, sigSL[1])
         if sigTP1[1] < eDn and qDn > 0                   // TP1 devant l'entrée (short) + taille calculable
