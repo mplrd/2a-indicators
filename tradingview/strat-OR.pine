@@ -1,0 +1,329 @@
+//@version=6
+// 2Ai_Strat_OR — Stratégie Open Range (première heure du jour).
+// Deux setups sur le range OR :
+//   - CASSURE       : une bougie clôture hors du range (continuation).
+//   - RÉINTÉGRATION : une bougie sort (mèche ou N clôtures) puis clôture dans le range (fade).
+// ENTRÉE = ordre STOP sur l'extrême de la bougie déclencheuse, dans le sens du trade :
+//   long → buy-stop sur son HAUT ; short → sell-stop sur son BAS. L'ordre reste valide jusqu'à ce que
+//   le setup soit invalidé (le prix atteint le niveau du SL avant l'entrée) ou la fin de journée.
+//   Garde-fou : si l'extrême a déjà dépassé le TP1, le setup est ignoré.
+// SL/TP multi-cibles paramétrables, BE au TP1, runner. Sizing par risque constant (perte au SL = %
+// d'equity fixé). Rendu : 1 box position (entrée→TP3) + lignes TP1/TP2 + 1 box SL (grisée au BE/sortie).
+// Panneau debug (haut-droite) : compteurs réels (setups / placés / skips / annulés / filés / engine).
+// Spec : .docs/SPECIFICATIONS.md § "Stratégie 1 : 2Ai_Strat_OR".
+//
+// Contrainte plateforme : une stratégie Pine n'a qu'UNE position nette. Un setup de sens opposé à
+// la position en cours est SKIPPÉ (sinon strategy.entry inverserait la position). Pyramiding = même sens.
+strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
+  pyramiding = 100,                                     // borne haute ; le vrai plafond/jour est `tradesMax`
+  default_qty_type = strategy.percent_of_equity,
+  default_qty_value = 1.0,                              // ignoré : la taille est calculée par risque (qty explicite)
+  initial_capital = 10000,
+  calc_on_every_tick = false,
+  max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+import mpilard/lib_levels/12 as levels
+
+// ============================================================
+// Inputs
+// ============================================================
+var string GRP_GEN = "Général"
+orTz      = input.string("Europe/Paris", "TZ Open Range",     group = GRP_GEN, tooltip = "TZ IANA définissant le 'minuit' de l'Open Range (Pine n'expose pas la TZ du chart).")
+tradesMax = input.int(3,                 "Trades max / jour",  group = GRP_GEN, minval = 1,    maxval = 10)
+riskPct   = input.float(1.0,             "Risque par trade (%)", group = GRP_GEN, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
+debug     = input.bool(false,            "Debug (afficher les bulles de signal)", group = GRP_GEN, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
+
+var string GRP_SET = "Setups"
+enableBreak  = input.bool(true, "Cassure (continuation)", group = GRP_SET)
+enableReint  = input.bool(true, "Réintégration (fade)",   group = GRP_SET)
+breakOnClose = input.bool(false, "Cassure validée en CLÔTURE (sinon pendant la bougie / mèche)", group = GRP_SET, tooltip = "Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
+
+var string GRP_LVL = "Multiples SL / TP"
+tpBreak1    = input.float(1.0,  "TP1 cassure (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
+tpBreak2    = input.float(2.0,  "TP2 cassure (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
+tpBreak3    = input.float(5.0,  "TP3 cassure (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
+tpReint1    = input.float(0.5,  "TP1 réintég (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1, tooltip = "TP2 réintégration = borne opposée du range (fixe).")
+tpReint3    = input.float(2.0,  "TP3 réintég (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
+slBreakPct  = input.float(55.0, "SL cassure (% range)",  group = GRP_LVL, minval = 0,   step = 1,   tooltip = "% du range depuis la borne cassée. 55 = défaut. Non capé : >100 autorisé (SL au-delà de la borne opposée).")
+slReintWick = input.float(50.0, "SL réintég (% mèche)",  group = GRP_LVL, minval = 0,   step = 5,   tooltip = "Fraction de la mèche de l'extrême, ajoutée au-delà de celui-ci. Non capé.")
+
+var string GRP_POS = "Répartition & gestion"
+qtyTP1    = input.int(50,   "Sortie TP1 (%)", group = GRP_POS, minval = 0, maxval = 100, tooltip = "TP1+TP2+TP3 doivent totaliser ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
+qtyTP2    = input.int(20,   "Sortie TP2 (%)", group = GRP_POS, minval = 0, maxval = 100)
+qtyTP3    = input.int(20,   "Sortie TP3 (%)", group = GRP_POS, minval = 0, maxval = 100)
+useRunner = input.bool(true, "Runner (reliquat, sort au stop)", group = GRP_POS, tooltip = "Si off, le reliquat est ajouté à TP3.")
+moveToBE  = input.bool(true, "Passage à BE au TP1",             group = GRP_POS)
+
+// ============================================================
+// Constantes & couleurs
+// ============================================================
+COL_SL   = color.red
+COL_TP   = color.green
+COL_GREY = color.gray
+
+// Répartition effective (le reliquat va au runner, ou à TP3 si runner off)
+splitBase  = qtyTP1 + qtyTP2 + qtyTP3
+remainder  = math.max(0, 100 - splitBase)
+runnerPct  = useRunner ? remainder : 0
+p3eff      = useRunner ? qtyTP3 : qtyTP3 + remainder
+validSplit = splitBase <= 100
+
+// ============================================================
+// Type Trade — état pour fill, BE, et cycle de vie du rendu
+// ============================================================
+type Trade
+    string id
+    int    issueBar
+    int    leftTime
+    bool   verified     // l'ordre stop a-t-il filé (dans strategy.*trades) ?
+    int    dir          // +1 long, -1 short
+    float  entry
+    float  sl
+    float  tp1
+    float  tp2
+    float  tp3
+    bool   tp1Hit
+    bool   closed
+    box    bxSL
+    box    bxPos
+    line   lnT1
+    line   lnT2
+    bool   slGreyed
+
+// ============================================================
+// État persistant (reset au changement de jour chart)
+// ============================================================
+var int   tradesToday  = 0
+var bool  outAbove     = false
+var bool  outBelow     = false
+var float exHigh       = na
+var float exHighWick   = na
+var float exLow        = na
+var float exLowWick    = na
+var bool  brokeUpState = false   // dernière clôture évaluée au-dessus de orH ?
+var bool  brokeDnState = false   // dernière clôture évaluée sous orL ?
+var bool  cassuredUp   = false   // une bougie a CLÔTURÉ au-dessus de orH (cassure confirmée, pas une mèche) ?
+var bool  cassuredDn   = false   // une bougie a CLÔTURÉ sous orL ?
+var int   tradeSeq     = 0
+var array<Trade> trades = array.new<Trade>()
+
+// Compteurs debug (cumulés sur tout le backtest, jamais reset)
+var int cntTriggers  = 0   // setups détectés
+var int cntPlaced    = 0   // ordres stop placés
+var int cntCancelled = 0   // ordres annulés (extrême non cassé dans la fenêtre)
+var int cntFilled    = 0   // ordres réellement filés (boxes matérialisées)
+var int cntSkipOpp   = 0   // skip : sens opposé à la position ouverte
+var int cntSkipTp    = 0   // skip : TP déjà derrière l'entrée
+var int cntSkipQty   = 0   // skip : qty<=0 ou répartition invalide
+
+// ============================================================
+// Calculs de barre (jamais en bloc conditionnel pour ta.*)
+// ============================================================
+oneBarMs  = timeframe.in_seconds() * 1000
+dayChange = ta.change(dayofmonth(time, orTz)) != 0
+
+[orH, orL, _orStart, orEnd, orSeen] = levels.openRange(orTz)
+R       = orH - orL
+orReady = orSeen and not na(orEnd) and not na(R) and R > 0 and time >= orEnd
+
+// Helpers de rendu (box bornée + ligne horizontale, ancrées en bar_time, étendues manuellement)
+mkBox(int lt, float a, float b, color col) => box.new(left = lt, top = math.max(a, b), right = lt + oneBarMs, bottom = math.min(a, b), xloc = xloc.bar_time, border_color = color.new(col, 40), bgcolor = color.new(col, 85), border_width = 1, extend = extend.none, force_overlay = true)
+mkLine(int lt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = lt + oneBarMs, y2 = y, xloc = xloc.bar_time, color = color.new(col, 20), width = 1, style = line.style_dashed, force_overlay = true)
+
+// Le trade a-t-il filé (ouvert ou déjà clôturé) ?
+filledNow(string id) =>
+    bool f = false
+    if strategy.opentrades > 0
+        for i = 0 to strategy.opentrades - 1
+            if strategy.opentrades.entry_id(i) == id
+                f := true
+                break
+    if not f and strategy.closedtrades > 0
+        fromIdx = math.max(0, strategy.closedtrades - 5)
+        for i = strategy.closedtrades - 1 to fromIdx
+            if strategy.closedtrades.entry_id(i) == id
+                f := true
+                break
+    f
+
+// Marqueurs debug (série réinitialisée chaque barre) : niveau d'entrée des triggers + fills.
+float dbgTrigUp = na   // entrée d'un trigger LONG (cassure haute / réintégration basse)
+float dbgTrigDn = na   // entrée d'un trigger SHORT (cassure basse / réintégration haute)
+float dbgFill   = na   // niveau d'entrée d'un ordre qui a réellement filé
+
+// ============================================================
+// Logique — uniquement sur bougie fermée (pas de repaint)
+// ============================================================
+if barstate.isconfirmed
+    // --- Nouveau jour : reset de l'état de DÉTECTION (les ordres/positions seront gérés à l'étape suivante).
+    if dayChange
+        outAbove     := false
+        outBelow     := false
+        exHigh       := na
+        exHighWick   := na
+        exLow        := na
+        exLowWick    := na
+        brokeUpState := false
+        brokeDnState := false
+        cassuredUp   := false
+        cassuredDn   := false
+
+    // --- 1. Vérification du fill / annulation + gestion des trades ouverts ---
+    rightT = time + oneBarMs
+    for t in trades
+        // L'ordre stop persiste jusqu'à ce qu'il file OU soit annulé en fin de journée (cf. bloc dayChange).
+        if not t.verified
+            if filledNow(t.id)
+                t.verified  := true
+                cntFilled   += 1
+                tradesToday += 1   // le plafond/jour compte les ENTRÉES réelles, pas les placements
+                dbgFill     := t.entry
+                // Ancrage sur la bougie de FILL (= entrée réelle), pas sur la bougie déclencheuse.
+                // L'ordre stop file après le déclencheur → sinon la box est décalée à gauche du trade.
+                t.bxSL     := mkBox(time, t.entry, t.sl,  COL_SL)
+                t.bxPos    := mkBox(time, t.entry, t.tp3, COL_TP)
+                t.lnT1     := qtyTP1 > 0 ? mkLine(time, t.tp1, COL_TP) : na
+                t.lnT2     := qtyTP2 > 0 ? mkLine(time, t.tp2, COL_TP) : na
+
+        if t.verified and not t.closed
+            hitT1 = t.dir == 1 ? high >= t.tp1 : low <= t.tp1
+            hitT3 = t.dir == 1 ? high >= t.tp3 : low <= t.tp3
+
+            // Passage à BE au TP1 (toggle) : on déplace le stop du reliquat au prix d'entrée.
+            if not t.tp1Hit and hitT1
+                t.tp1Hit := true
+                if moveToBE
+                    if qtyTP2 > 0
+                        strategy.exit(t.id + "-2", from_entry = t.id, qty_percent = qtyTP2, limit = t.tp2, stop = t.entry)
+                    if p3eff > 0
+                        strategy.exit(t.id + "-3", from_entry = t.id, qty_percent = p3eff, limit = t.tp3, stop = t.entry)
+                    if runnerPct > 0
+                        strategy.exit(t.id + "-r", from_entry = t.id, qty_percent = runnerPct, stop = t.entry)
+
+            // Stop courant : SL d'origine, ou BE après TP1 si le toggle est actif.
+            stopNow = (t.tp1Hit and moveToBE) ? t.entry : t.sl
+            stopHit = t.dir == 1 ? low <= stopNow : high >= stopNow
+            if stopHit or (runnerPct == 0 and hitT3)
+                t.closed := true
+
+            // Tous les éléments partagent le MÊME bord droit. La box SL passe juste en gris quand
+            // elle n'est plus le risque vivant (BE atteint ou sortie).
+            if ((t.tp1Hit and moveToBE) or t.closed) and not t.slGreyed
+                box.set_bgcolor(t.bxSL, color.new(COL_GREY, 88))
+                box.set_border_color(t.bxSL, color.new(COL_GREY, 50))
+                t.slGreyed := true
+            box.set_right(t.bxSL, rightT)
+            box.set_right(t.bxPos, rightT)
+            if not na(t.lnT1)
+                line.set_x2(t.lnT1, rightT)
+            if not na(t.lnT2)
+                line.set_x2(t.lnT2, rightT)
+
+    // Purge des trades clôturés / annulés (rendu déjà figé).
+    if array.size(trades) > 0
+        for i = array.size(trades) - 1 to 0
+            if array.get(trades, i).closed
+                array.remove(trades, i)
+
+    // --- 2. Détection des déclencheurs (OR figé) ---
+    if orReady
+        // Suivi de l'excursion (extrême Dow fadé par une réintégration)
+        if high > orH
+            if not outAbove
+                outAbove   := true
+                exHigh     := high
+                exHighWick := high - math.max(open, close)
+            else if high > exHigh
+                exHigh     := high
+                exHighWick := high - math.max(open, close)
+        if low < orL
+            if not outBelow
+                outBelow  := true
+                exLow     := low
+                exLowWick := math.min(open, close) - low
+            else if low < exLow
+                exLow     := low
+                exLowWick := math.min(open, close) - low
+
+        // La CASSURE se déclenche sur la 1re clôture au-delà de la borne (pas à chaque barre dehors).
+        firstCloseAbove = close > orH and not brokeUpState
+        firstCloseBelow = close < orL and not brokeDnState
+        brokeUpState := close > orH
+        brokeDnState := close < orL
+        // Cassure CONFIRMÉE = une clôture au-delà. Elle arme la réintégration (qui attend un retour dedans).
+        if close > orH
+            cassuredUp := true
+        if close < orL
+            cassuredDn := true
+        closeInside  = close <= orH and close >= orL
+        slBreakDist  = (slBreakPct / 100.0) * R
+
+        // Un déclencheur fige : sens, SL, TPs (ancrés sur l'OR). L'entrée se fait au marché à la
+        // clôture de la bougie déclencheuse (proche de la borne OR → cibles toujours du bon côté).
+        bool  triggered = false
+        int   tDir      = 0
+        float tEntry    = na      // niveau du stop = extrême de la bougie de signal (fixé en section 3)
+        float tSL       = na
+        float tTP1      = na
+        float tTP2      = na
+        float tTP3      = na
+        if enableBreak and firstCloseAbove
+            triggered := true
+            tDir   := 1
+            tSL    := orH - slBreakDist
+            tTP1   := orH + tpBreak1 * R
+            tTP2   := orH + tpBreak2 * R
+            tTP3   := orH + tpBreak3 * R
+        else if enableBreak and firstCloseBelow
+            triggered := true
+            tDir   := -1
+            tSL    := orL + slBreakDist
+            tTP1   := orL - tpBreak1 * R
+            tTP2   := orL - tpBreak2 * R
+            tTP3   := orL - tpBreak3 * R
+        else if enableReint and closeInside and cassuredUp
+            triggered := true                                // cassure confirmée en haut puis retour dedans → short
+            tDir   := -1
+            tSL    := low + (slReintWick / 100.0) * R        // SL = % du range AU-DESSUS de l'extrême d'entrée (taille saine)
+            tTP1   := orH - tpReint1 * R
+            tTP2   := orL
+            tTP3   := orH - tpReint3 * R
+            cassuredUp := false                              // ré-armé : il faudra une NOUVELLE cassure
+            outAbove   := false
+        else if enableReint and closeInside and cassuredDn
+            triggered := true                                // cassure confirmée en bas puis retour dedans → long
+            tDir   := 1
+            tSL    := high - (slReintWick / 100.0) * R       // SL = % du range SOUS l'extrême d'entrée
+            tTP1   := orL + tpReint1 * R
+            tTP2   := orH
+            tTP3   := orL + tpReint3 * R
+            cassuredDn := false
+            outBelow   := false
+
+        // --- 3. BULLES : on marque le niveau d'entrée potentiel (extrême de la bougie de signal).
+        //        L'ENTRÉE/LES ORDRES sont retirés — à reconstruire step by step.
+        if triggered
+            cntTriggers += 1
+            tEntry := tDir == 1 ? high : low                 // extrême de la bougie de signal (haut si long, bas si short)
+            if tDir == 1
+                dbgTrigUp := tEntry
+            else
+                dbgTrigDn := tEntry
+
+// ============================================================
+// Visualisation de l'Open Range + debug
+// ============================================================
+plot(orReady ? orH : na, "OR High", color = color.new(color.blue, 0), linewidth = 1, style = plot.style_linebr)
+plot(orReady ? orL : na, "OR Low",  color = color.new(color.blue, 0), linewidth = 1, style = plot.style_linebr)
+// BULLES : ronds au niveau d'entrée potentiel — lime = signal long (cassure haute / réintég basse),
+//          rouge = signal short (cassure basse / réintég haute). Marquent les cassures et réintégrations.
+plot(debug ? dbgTrigUp : na, "Signal long",  color = color.new(color.lime, 0), style = plot.style_circles, linewidth = 3)
+plot(debug ? dbgTrigDn : na, "Signal short", color = color.new(color.red,  0), style = plot.style_circles, linewidth = 3)
+
+// FLÈCHES : la bougie de bulle est-elle cassée par la bougie SUIVANTE (celle-ci) ?
+//   - bulle verte (long) cassée par le HAUT  : high de cette bougie > high de la bulle  → flèche up
+//   - bulle rouge (short) cassée par le BAS   : low de cette bougie  < low de la bulle   → flèche down
+breakUp = not na(dbgTrigUp[1]) and (breakOnClose ? close > dbgTrigUp[1] : high > dbgTrigUp[1])
+breakDn = not na(dbgTrigDn[1]) and (breakOnClose ? close < dbgTrigDn[1] : low  < dbgTrigDn[1])
+plotshape(breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
+plotshape(breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
