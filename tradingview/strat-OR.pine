@@ -45,7 +45,7 @@ tpBreak3    = input.float(5.0,  "TP3 cassure (×range)",  group = GRP_LVL, minva
 tpReint1    = input.float(0.5,  "TP1 réintég (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1, tooltip = "TP2 réintégration = borne opposée du range (fixe).")
 tpReint3    = input.float(2.0,  "TP3 réintég (×range)",  group = GRP_LVL, minval = 0.1, step = 0.1)
 slBreakPct  = input.float(55.0, "SL cassure (% range)",  group = GRP_LVL, minval = 0,   step = 1,   tooltip = "% du range depuis la borne cassée. 55 = défaut. Non capé : >100 autorisé (SL au-delà de la borne opposée).")
-slReintWick = input.float(50.0, "SL réintég (% mèche)",  group = GRP_LVL, minval = 0,   step = 5,   tooltip = "Fraction de la mèche de l'extrême, ajoutée au-delà de celui-ci. Non capé.")
+slReintWick = input.float(100.0, "SL réintég (% mèche)",  group = GRP_LVL, minval = 0,   step = 5,   tooltip = "Fraction de la mèche de l'extrême, ajoutée au-delà de celui-ci. Non capé.")
 
 var string GRP_POS = "Répartition & gestion"
 qtyTP1    = input.int(50,   "Sortie TP1 (%)", group = GRP_POS, minval = 0, maxval = 100, tooltip = "TP1+TP2+TP3 doivent totaliser ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
@@ -130,6 +130,16 @@ orReady = orSeen and not na(orEnd) and not na(R) and R > 0 and time >= orEnd
 mkBox(int lt, float a, float b, color col) => box.new(left = lt, top = math.max(a, b), right = lt + oneBarMs, bottom = math.min(a, b), xloc = xloc.bar_time, border_color = color.new(col, 40), bgcolor = color.new(col, 85), border_width = 1, extend = extend.none, force_overlay = true)
 mkLine(int lt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = lt + oneBarMs, y2 = y, xloc = xloc.bar_time, color = color.new(col, 20), width = 1, style = line.style_dashed, force_overlay = true)
 
+// Dessine la position d'un signal sur 3 bougies (statique pour l'instant ; extension jusqu'à fermeture → plus tard).
+//   box verte entrée→TP3, box rouge entrée→SL, lignes pointillées TP1/TP2. Ancrée à la bougie courante (la flèche).
+drawPos(float entry, float sl, float tp1, float tp2, float tp3) =>
+    lt = time
+    rt = time + 3 * oneBarMs
+    box.new(lt, math.max(entry, tp3), rt, math.min(entry, tp3), xloc = xloc.bar_time, border_color = color.new(COL_TP, 40), bgcolor = color.new(COL_TP, 85), border_width = 1, force_overlay = true)
+    box.new(lt, math.max(entry, sl),  rt, math.min(entry, sl),  xloc = xloc.bar_time, border_color = color.new(COL_SL, 40), bgcolor = color.new(COL_SL, 85), border_width = 1, force_overlay = true)
+    line.new(lt, tp1, rt, tp1, xloc = xloc.bar_time, color = color.new(COL_TP, 20), width = 1, style = line.style_dashed, force_overlay = true)
+    line.new(lt, tp2, rt, tp2, xloc = xloc.bar_time, color = color.new(COL_TP, 20), width = 1, style = line.style_dashed, force_overlay = true)
+
 // Le trade a-t-il filé (ouvert ou déjà clôturé) ?
 filledNow(string id) =>
     bool f = false
@@ -146,10 +156,16 @@ filledNow(string id) =>
                 break
     f
 
-// Marqueurs debug (série réinitialisée chaque barre) : niveau d'entrée des triggers + fills.
-float dbgTrigUp = na   // entrée d'un trigger LONG (cassure haute / réintégration basse)
-float dbgTrigDn = na   // entrée d'un trigger SHORT (cassure basse / réintégration haute)
-float dbgFill   = na   // niveau d'entrée d'un ordre qui a réellement filé
+// Marqueurs de signal (série réinitialisée chaque barre) : niveau d'entrée potentiel par sens.
+float dbgTrigUp = na   // bulle LONG : extrême (haut) de la bougie de signal
+float dbgTrigDn = na   // bulle SHORT : extrême (bas) de la bougie de signal
+float dbgFill   = na   // (inutilisé pour l'instant)
+
+// SL/TP du signal de la bougie courante — mémorisés pour les redessiner à la flèche (bougie suivante).
+float sigSL  = na   // SL CASSURE (niveau du range). na si réintégration → SL calculé à la flèche.
+float sigTP1 = na
+float sigTP2 = na
+float sigTP3 = na
 
 // ============================================================
 // Logique — uniquement sur bougie fermée (pas de repaint)
@@ -284,7 +300,8 @@ if barstate.isconfirmed
         else if enableReint and closeInside and cassuredUp
             triggered := true                                // cassure confirmée en haut puis retour dedans → short
             tDir   := -1
-            tSL    := low + (slReintWick / 100.0) * R        // SL = % du range AU-DESSUS de l'extrême d'entrée (taille saine)
+            upW = high - math.max(open, close)               // mèche HAUTE de la bougie de réintégration (la bulle)
+            tSL := high + (slReintWick / 100.0) * (upW > 0 ? upW : math.abs(open - close))   // SL au-dessus (body si open en extrême)
             tTP1   := orH - tpReint1 * R
             tTP2   := orL
             tTP3   := orH - tpReint3 * R
@@ -293,7 +310,8 @@ if barstate.isconfirmed
         else if enableReint and closeInside and cassuredDn
             triggered := true                                // cassure confirmée en bas puis retour dedans → long
             tDir   := 1
-            tSL    := high - (slReintWick / 100.0) * R       // SL = % du range SOUS l'extrême d'entrée
+            dnW = math.min(open, close) - low                // mèche BASSE de la bougie de réintégration (la bulle)
+            tSL := low - (slReintWick / 100.0) * (dnW > 0 ? dnW : math.abs(open - close))    // SL en-dessous (body si open en extrême)
             tTP1   := orL + tpReint1 * R
             tTP2   := orH
             tTP3   := orL + tpReint3 * R
@@ -305,6 +323,10 @@ if barstate.isconfirmed
         if triggered
             cntTriggers += 1
             tEntry := tDir == 1 ? high : low                 // extrême de la bougie de signal (haut si long, bas si short)
+            sigSL  := tSL                                    // SL cassure (niveau range) ; na si réintégration
+            sigTP1 := tTP1
+            sigTP2 := tTP2
+            sigTP3 := tTP3
             if tDir == 1
                 dbgTrigUp := tEntry
             else
@@ -327,3 +349,11 @@ breakUp = not na(dbgTrigUp[1]) and (breakOnClose ? close > dbgTrigUp[1] : high >
 breakDn = not na(dbgTrigDn[1]) and (breakOnClose ? close < dbgTrigDn[1] : low  < dbgTrigDn[1])
 plotshape(breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
 plotshape(breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
+
+// DESSIN DE LA POSITION à chaque flèche (long sur breakUp, short sur breakDn).
+//   Entrée = close de la bougie-flèche si validation en clôture, sinon le niveau cassé (extrême de la bulle).
+//   SL/TP = ceux du signal, déjà calculés sur la bougie-bulle (cassure = niveau range ; réintég = mèche). Lus en [1].
+if breakUp
+    drawPos(breakOnClose ? close : dbgTrigUp[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+if breakDn
+    drawPos(breakOnClose ? close : dbgTrigDn[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
