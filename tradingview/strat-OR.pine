@@ -307,12 +307,17 @@ plotshape(breakDn, "Breakdown", style = shape.arrowdown, location = location.abo
 if barstate.isconfirmed
     // Plafonds : `tradesMax` trades ouverts/jour, `maxOpen` positions simultanées (renfort).
     //   array.size(trades) = positions encore ouvertes (les fermées sont purgées plus bas).
+    // Garde-fou : on rejette le setup si le TP1 est déjà DERRIÈRE l'entrée (entrée au-delà de la 1re cible).
     if breakUp and tradesToday < tradesMax and array.size(trades) < maxOpen
-        openPos(1,  breakOnClose ? close : dbgTrigUp[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
-        tradesToday += 1
+        eUp = breakOnClose ? close : dbgTrigUp[1]
+        if sigTP1[1] > eUp                               // TP1 devant l'entrée (long) → trade valide
+            openPos(1, eUp, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+            tradesToday += 1
     if breakDn and tradesToday < tradesMax and array.size(trades) < maxOpen
-        openPos(-1, breakOnClose ? close : dbgTrigDn[1], sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
-        tradesToday += 1
+        eDn = breakOnClose ? close : dbgTrigDn[1]
+        if sigTP1[1] < eDn                               // TP1 devant l'entrée (short) → trade valide
+            openPos(-1, eDn, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
+            tradesToday += 1
 
     // Chaque barre fermée : étendre les positions ouvertes (même bord droit), armer le BE (anticipé
     //   % prix OU au TP1 → stop à l'entrée, box SL grisée — réservé à une position VIVANTE), et FIGER au stop
