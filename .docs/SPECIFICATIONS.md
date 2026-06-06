@@ -704,17 +704,30 @@ d'entrée :
 - **1 box position** verte : entrée → **TP3** (la zone de profit globale).
 - **2 lignes** pointillées vertes aux niveaux **TP1** et **TP2** (cibles partielles dans la zone).
 - **1 box SL** rouge : entrée → SL.
-- **Pas de rendu pour le runner**.
+- **Rayon « taille restante »** : tracé **dès l'entrée** au **niveau d'entrée**, **vert** pour un long,
+  **rouge** pour un short. Son étiquette affiche la **taille réellement filée encore ouverte**
+  (interrogée sur la position moteur `strategy.opentrades`, **pas** la taille *demandée* qui peut être
+  capée par le capital), **signée** (« - » pour un short) et qui **décroît à chaque TP filé** (entrée
+  → −TP1 → −TP2 → −TP3 → runner). L'étiquette est **vide** tant que le fill n'est pas comptabilisé (la
+  barre d'entrée). Le rayon est porté **`RUN_LEAD` = 5 barres devant la barre courante** (étiquette à
+  son extrémité) et avance bougie par bougie jusqu'à la sortie, où il est **supprimé** (rayon + label)
+  — **aucune trace de taille restante sur une position fermée** (seules les boxes restent, estompées).
+- **Runner** : tant que le TP3 n'est pas atteint, le reliquat fait partie de la box principale. **Au
+  TP3**, la box position (et les lignes TP) **se figent et s'estompent** (le gros du trade est fini) ;
+  seul le **rayon « taille restante »** continue de courir (il porte alors la taille du runner) jusqu'à
+  la sortie du runner (stop / BE).
 - Chaque élément **étend son bord droit bougie par bougie** tant que sa cible n'est pas atteinte / le
   trade pas clôturé, puis se fige.
 - **Grisage de la box SL** dès qu'elle n'est plus le risque vivant : au **passage à BE** (TP1 atteint,
   si BE activé) **ou** à la **sortie** du trade.
 - Tous les éléments d'un trade partagent le **même bord droit** (ils s'étendent jusqu'à la clôture du
   trade) — la box SL ne fait que changer de couleur, elle ne s'arrête pas avant les autres.
-- **Boxes créées uniquement pour les trades réellement exécutés** : on attend la **confirmation du
-  fill** (dans `strategy.opentrades` / `closedtrades`). Un ordre stop **non filé** (extrême non cassé
-  dans la fenêtre → annulé, ou `qty` arrondie à 0) ne laisse **aucune trace** → le chart reflète le
-  backtest.
+- **Dessin uniquement pour les trades réellement exécutés** : à l'entrée on **place** l'ordre marché et
+  on enregistre une entrée **en attente** (`Pending`), **sans rien dessiner**. La box, les lignes TP et
+  le rayon ne sont créés qu'à la **barre où le fill est confirmé** (la position apparaît dans
+  `strategy.opentrades`, `liveSize ≠ 0`), **ancrés à la bougie d'entrée**. Un ordre **non filé** (`qty`
+  capée à 0 par le capital) est **purgé dès la barre suivante** et ne laisse **aucune trace** → le chart
+  reflète exactement le backtest (pas de box ni de label vide pour une position qui n'existe pas).
 - **Tracé de l'Open Range** (OR High / OR Low) du jour, pour contrôler visuellement la bougie / TZ
   retenue par la stratégie.
 
