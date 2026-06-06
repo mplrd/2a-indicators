@@ -97,6 +97,7 @@ type Trade
     float tp3
     bool  closed       // figée : SL/BE ou TP3 touché
     bool  slGreyed     // BE armé : stop ramené à l'entrée + box SL grisée
+    bool  runner       // reliquat runner seul (TP3 atteint) → ne compte plus comme position en cours
     box   bxPos        // box verte entrée→TP3
     box   bxSL         // box rouge entrée→SL
     line  lnT1         // ligne pointillée TP1
@@ -150,7 +151,7 @@ openPos(string id, int dir, float entry, float sl, float tp1, float tp2, float t
     bxS = mkBox(time, entry, sl,  COL_SL)
     l1  = qtyTP1 > 0 ? mkLine(time, tp1, COL_TP) : na
     l2  = qtyTP2 > 0 ? mkLine(time, tp2, COL_TP) : na
-    array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
+    array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, runner = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2))
 
 // Taille par RISQUE : qty telle que la perte au SL (distance entrée↔SL × valeur du point) = riskPct% de l'equity.
 //   Retourne 0 si la distance est nulle (setup dégénéré → on n'ouvre pas). Écrase l'Order size des Propriétés.
@@ -322,12 +323,17 @@ if barstate.isconfirmed
     // Plafonds : `tradesMax` trades ouverts/jour, `maxOpen` positions simultanées (renfort).
     //   array.size(trades) = positions encore ouvertes (les fermées sont purgées plus bas).
     // Garde-fou : on rejette le setup si le TP1 est déjà DERRIÈRE l'entrée (entrée au-delà de la 1re cible).
-    // Sens / hedge (cf. `dirMode`). netDir = sens des positions ouvertes (+1 long / -1 short, 0 si aucune) ;
-    //   ne sert qu'au mode « net » (refuser un setup opposé à la position en cours).
-    netDir = array.size(trades) > 0 ? array.get(trades, 0).dir : 0
-    allowLong  = dirMode != DIR_SHORT and (dirMode != DIR_NET or netDir >= 0)
-    allowShort = dirMode != DIR_LONG  and (dirMode != DIR_NET or netDir <= 0)
-    if breakUp and tradesToday < tradesMax and array.size(trades) < maxOpen and allowLong
+    // Positions « en cours » = ouvertes NON-runner (un runner de-riské ne compte pas : ni slot maxOpen, ni sens).
+    //   openCount = leur nombre ; netDir = leur sens (+1 long / -1 short, 0 si aucune) — ne sert qu'au mode « net ».
+    int openCount = 0
+    int netDir    = 0
+    for t in trades
+        if not t.runner
+            openCount += 1
+            netDir := t.dir
+    allowLong  = validSplit and dirMode != DIR_SHORT and (dirMode != DIR_NET or netDir >= 0)
+    allowShort = validSplit and dirMode != DIR_LONG  and (dirMode != DIR_NET or netDir <= 0)
+    if breakUp and tradesToday < tradesMax and openCount < maxOpen and allowLong
         eUp = breakOnClose ? close : dbgTrigUp[1]
         qUp = riskQty(eUp, sigSL[1])
         if sigTP1[1] > eUp and qUp > 0                   // TP1 devant l'entrée (long) + taille calculable
@@ -335,7 +341,7 @@ if barstate.isconfirmed
             openPos(eid, 1, eUp, sigSL[1], sigTP1[1], sigTP2[1], sigTP3[1])
             strategy.entry(eid, strategy.long, qty = qUp)   // marché à la clôture, taille par risque
             tradesToday += 1
-    if breakDn and tradesToday < tradesMax and array.size(trades) < maxOpen and allowShort
+    if breakDn and tradesToday < tradesMax and openCount < maxOpen and allowShort
         eDn = breakOnClose ? close : dbgTrigDn[1]
         qDn = riskQty(eDn, sigSL[1])
         if sigTP1[1] < eDn and qDn > 0                   // TP1 devant l'entrée (short) + taille calculable
@@ -360,21 +366,35 @@ if barstate.isconfirmed
                 // Stop courant : SL d'origine, ou BE (= entrée) une fois la position sécurisée (slGreyed).
                 //   BE armé à la barre QUI SUIT le déclencheur (enregistré en fin de barre, après le test du stop).
                 stopNow = t.slGreyed ? t.entry : t.sl
-                strategy.exit("x" + t.id, from_entry = t.id, stop = stopNow, limit = t.tp3)   // sortie moteur : SL/BE ou TP3 (taille pleine)
+                // Sorties partielles moteur (stop COMMUN, suit le BE) : TP1/TP2/TP3 en limites + runner au stop/BE.
+                //   qty_percent = % de la position d'origine ; replacées chaque barre pour répercuter le stop courant.
+                if qtyTP1 > 0
+                    strategy.exit("t1" + t.id, from_entry = t.id, qty_percent = qtyTP1, stop = stopNow, limit = t.tp1)
+                if qtyTP2 > 0
+                    strategy.exit("t2" + t.id, from_entry = t.id, qty_percent = qtyTP2, stop = stopNow, limit = t.tp2)
+                if p3eff > 0
+                    strategy.exit("t3" + t.id, from_entry = t.id, qty_percent = p3eff, stop = stopNow, limit = t.tp3)
+                if runnerPct > 0
+                    strategy.exit("tr" + t.id, from_entry = t.id, qty_percent = runnerPct, stop = stopNow)
                 stopHit = t.dir == 1 ? low  <= stopNow : high >= stopNow
                 tp3Hit  = t.dir == 1 ? high >= t.tp3   : low  <= t.tp3
-                if stopHit or tp3Hit
+                // Avec runner : la position vit jusqu'au stop/BE (reliquat au-delà du TP3) ; sans runner : sortie au TP3.
+                if stopHit or (runnerPct == 0 and tp3Hit)
                     t.closed := true
                     fadePos(t)                                   // fermé → on estompe ; le gris reste réservé au BE en cours
-                else if not t.slGreyed
-                    // Pas encore sécurisée : on arme le BE selon le MODE choisi (anticipé = avant TP1).
-                    beEarlyLvl = t.dir == 1 ? t.entry * (1 + earlyBEPct / 100.0) : t.entry * (1 - earlyBEPct / 100.0)
-                    beEarly    = beMode == BE_EARLY and (t.dir == 1 ? high >= beEarlyLvl : low <= beEarlyLvl)
-                    beAtTp1    = beMode == BE_TP1   and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
-                    if beEarly or beAtTp1
-                        t.slGreyed := true                       // BE armé → box SL grisée (risque éteint, position VIVANTE)
-                        box.set_bgcolor(t.bxSL, color.new(COL_GREY, 85))
-                        box.set_border_color(t.bxSL, color.new(COL_GREY, 45))
+                else
+                    // TP3 atteint avec runner → reliquat seul : ne compte plus comme « position en cours ».
+                    if runnerPct > 0 and tp3Hit
+                        t.runner := true
+                    // BE : arme au premier déclencheur (anticipé = avant TP1) si pas encore sécurisée.
+                    if not t.slGreyed
+                        beEarlyLvl = t.dir == 1 ? t.entry * (1 + earlyBEPct / 100.0) : t.entry * (1 - earlyBEPct / 100.0)
+                        beEarly    = beMode == BE_EARLY and (t.dir == 1 ? high >= beEarlyLvl : low <= beEarlyLvl)
+                        beAtTp1    = beMode == BE_TP1   and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
+                        if beEarly or beAtTp1
+                            t.slGreyed := true                   // BE armé → box SL grisée (risque éteint, position VIVANTE)
+                            box.set_bgcolor(t.bxSL, color.new(COL_GREY, 85))
+                            box.set_border_color(t.bxSL, color.new(COL_GREY, 45))
         // Purge des positions figées (boxes déjà dessinées, gelées à leur dernier bord droit).
         for i = array.size(trades) - 1 to 0
             if array.get(trades, i).closed
