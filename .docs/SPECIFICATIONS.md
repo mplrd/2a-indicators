@@ -13,6 +13,8 @@ levels.pine             Indicateur "2Ai Levels"       (Gaps Daily, PDL/PDH, PWL/
 zones.pine              Indicateur "2Ai Zones"        (zones CMI, FVG)
 zones-MTF.pine          Indicateur "2Ai Zones MTF"    (zones CMI multi-timeframe)
 ... xxx.pine            Tout autre indicateur "2Ai XXX"
+strat-OR.pine           Stratégie  "2Ai_Strat_OR"     (Open Range 1re heure : cassure + réintégration)
+... strat-xxx.pine      Toute autre stratégie "2Ai_Strat_XXX"
 ```
 
 ### Dependances
@@ -573,3 +575,202 @@ Ordre d'empilement (haut → bas) : `COE`, `ENG`, `CMI`, `OE`.
 
 > Ces toggles d'affichage sont propres au harnais de test (isoler un signal pendant la validation).
 > Aucun réglage n'altère la détection elle-même.
+
+---
+
+## Stratégie 1 : 2Ai_Strat_OR (`strat-OR.pine`)
+
+Première **stratégie** de la suite (`strategy(...)`, pas `indicator(...)`) — elle produit donc un
+rapport de backtest TradingView. Elle trade l'**Open Range de la première heure du jour** : deux
+setups seulement, **cassure** (continuation) et **réintégration** (fade). Comme un indicateur, c'est
+un **orchestrateur** : elle importe l'Open Range (`lib_levels`), embarque sa propre logique de gestion
+de position, et dessine ses boxes inline. L'entrée se fait **au marché à la clôture** de la bougie de
+signal (cassure/réintégration), pas par un pattern `lib_signal`.
+
+### 1. Open Range (source)
+
+L'Open Range = High/Low des **60 premières minutes du jour**, calculé par
+`lib_levels.openRange(tz)` (cf. Indicateur 2, « Niveaux d'ouverture »). `tz` définit le « minuit »
+de référence et est exposé en **input** (Pine n'expose pas la TZ d'affichage du chart — même
+contrainte que `2Ai Levels` et `2Ai Zones MTF`).
+
+- `R = orH − orL` (amplitude du range).
+- Le range est exploitable **une fois figé** (après `orEnd`). Aucun trade tant que l'OR se construit.
+- TF d'exécution attendue : **M5 ou M15** (granularité pour les signaux et les boxes ; l'OR reste
+  la 1re heure quelle que soit l'UT < H1).
+
+### 2. Suivi de l'excursion (machine d'état)
+
+À chaque **bougie fermée** (`barstate.isconfirmed`), une fois l'OR figé, l'état suivant est tenu en
+`var`, **réinitialisé au changement de jour chart** (dans `tz`) :
+
+- **Sortie par le haut** : dès que `high > orH` (mèche **ou** clôture). On mémorise `exHigh` = plus
+  haut de l'excursion et `exHighWick` = mèche haute (`high − max(open, close)`) de la bougie qui l'a
+  marqué. Tant qu'on reste sorti, `exHigh` est poussé à chaque nouveau plus-haut.
+- **Sortie par le bas** : miroir avec `low < orL`, `exLow`, `exLowWick` (`min(open, close) − low`).
+
+`exHigh` / `exLow` sont l'**extrême de l'excursion** = le sommet/creux (au sens **Dow** : le point
+d'inflexion d'où part le retournement) que la réintégration vient fader. Ils servent d'ancre au SL
+de réintégration (§4).
+
+### 3. Détection des deux setups
+
+Évaluée sur bougie fermée, OR figé :
+
+- **Cassure** = bougie qui **clôture hors** du range :
+  - `close > orH` → setup **cassure haute** (long, continuation).
+  - `close < orL` → setup **cassure basse** (short, continuation).
+- **Réintégration** = bougie qui **clôture dans** le range alors que le prix **était sorti** (mèche
+  ou N clôtures dehors) :
+  - sortie haute puis retour dedans → setup **réintégration haute** (short, fade).
+  - sortie basse puis retour dedans → setup **réintégration basse** (long, fade).
+  - Le cas « mèche pure » (sortie + retour sur la même bougie) est le sous-cas où sortie et clôture
+    intérieure tombent sur la même barre.
+
+Le setup est **armé** sur sa bougie déclencheuse (on retient `bar_index`). La cassure ne s'arme que
+sur la **1ʳᵉ clôture au-delà de la borne** (la « bougie qui casse ») — **pas** à chaque barre restée
+dehors (sinon le setup resterait armé des heures et entrerait très loin de la cassure). Le prix doit
+**revenir puis recasser** pour ré-armer.
+
+### 4. Entrée — ordre MARCHÉ à la clôture de la bougie de signal
+
+L'entrée n'est **pas** déclenchée par un pattern `lib_signal`. Dès que la **bougie de signal** clôture
+(la bougie qui casse pour une cassure ; celle qui réintègre pour une réintégration), on entre **au
+marché à sa clôture**, dans le sens du trade (`strategy.entry` sans `stop=`, avec
+`process_orders_on_close = true`) :
+
+| Setup | Sens | Déclencheur (clôture) |
+|-------|------|------------------------|
+| Cassure haute | long  | `close > orH` (1ʳᵉ clôture au-dessus) |
+| Cassure basse | short | `close < orL` (1ʳᵉ clôture en-dessous) |
+| Réintégration haute | short | sortie haute puis `close` revient dans le range |
+| Réintégration basse | long  | sortie basse puis `close` revient dans le range |
+
+- Le **prix d'entrée = la clôture** de la bougie de signal (donc **BE = ce close**). SL/TP figés au
+  moment de l'entrée.
+- **Pas d'ordre stop en attente, donc pas d'invalidation pré-entrée** : la bougie qui clôture
+  hors/dans le range **EST** l'exécution. (Historique : une 1ʳᵉ version posait un ordre stop sur la
+  mèche de la bougie — il ne filait quasi jamais, ~2 trades sur 6 mois. Abandonné.)
+- **Garde-fou** : on n'entre que si le **TP1 est encore devant l'entrée** (`tpAhead`) — sécurité pour
+  garantir toutes les cibles du bon côté.
+- Chaque famille de setup a son toggle (`Cassure`, `Réintégration`) pour l'isoler en backtest.
+- `lib_signal` n'est **plus** utilisé par cette stratégie.
+
+### 5. Géométrie SL / TP (`R = orH − orL`)
+
+Les multiples ci-dessous sont les **défauts** ; ils sont tous exposés en settings (groupe
+*Multiples SL / TP*) pour adapter au comportement de chaque actif. La borne opposée (TP2
+réintégration) reste fixe (`orL` / `orH`).
+
+| Setup | Sens | SL | TP1 (50 %) | TP2 (20 %) | TP3 (20 %) | Runner (10 %) |
+|-------|------|----|------------|------------|------------|---------------|
+| Cassure haute | long  | `orL + 0.45·R` (= 55 % du range sous le haut) | `orH + 1·R` | `orH + 2·R` | `orH + 5·R` | BE only |
+| Cassure basse | short | `orH − 0.45·R` (= 55 % au-dessus du bas) | `orL − 1·R` | `orL − 2·R` | `orL − 5·R` | BE only |
+| Réintég. haute | short | `exHigh + 0.5·exHighWick` | `orH − 0.5·R` (milieu) | `orL` (borne opposée) | `orH − 2·R` | BE only |
+| Réintég. basse | long  | `exLow − 0.5·exLowWick`   | `orL + 0.5·R` (milieu) | `orH` (borne opposée) | `orL + 2·R` | BE only |
+
+- **SL cassure** : exprimé en **% du range depuis la borne cassée** (`SL cassure (% range)`, défaut
+  **55 %** → `orH − 0.55·R` en long ; `orL + 0.55·R` en short). Saisie **non capée** : > 100 %
+  autorisé (SL au-delà de la borne opposée).
+- **SL réintégration** : l'extrême de l'excursion fadée (§2), avec une marge de **50 % de la mèche**
+  de la bougie qui a marqué cet extrême.
+
+### 6. Gestion de position
+
+- **Sizing par risque constant** : la taille est calculée pour que la **perte au SL = `Risque par
+  trade (%)`** de l'equity, quelle que soit la largeur du range/SL (`qty = equity·risk% / (distance
+  entrée→SL · pointvalue)`). Comparable entre actifs. Écrase l'*Order size* de l'onglet Properties ;
+  le rapport de perfs TradingView reste exact (calculé sur les fills réels).
+- Répartition par défaut **50 / 20 / 20 / 10 %** (TP1, TP2, TP3, runner), **paramétrable**. TP1+TP2+TP3
+  doivent totaliser ≤ 100 % ; le reliquat alimente le **runner**, ou est ajouté à TP3 si le runner
+  est désactivé.
+- **Passage à BE au TP1** (toggle, défaut on) : dès TP1 atteint, le SL du reliquat est ramené au
+  **prix d'entrée exact** (frais ignorés). Si off, le stop reste au SL d'origine.
+- **Runner** (toggle, défaut on) : aucune cible programmatique — il ne sort que par le **stop** (BE
+  après TP1, ou SL d'origine si BE off) ou à la main. Une position encore ouverte au changement de
+  jour est **laissée vivre** (pas de clôture forcée de fin de journée).
+- **Pyramiding** : plusieurs entrées **de même sens** peuvent coexister (chacune son `id`, son
+  SL/TP/BE et ses boxes via `from_entry`), jusqu'au plafond **Trades max / jour**. Les entrées sont
+  **bloquées hors de la journée en cours**.
+- **Contrainte position nette unique** : une stratégie Pine ne porte qu'**une position nette** (pas
+  de long et short simultanés). Un setup de **sens opposé** à la position en cours est donc
+  **ignoré** (on ne flippe pas la position — cela casserait la gestion indépendante par trade).
+
+### 7. Rendu (façon position long/short TV)
+
+Rendu **inline** dans la stratégie (le cycle de vie est couplé à l'état du trade), ancré à la bougie
+d'entrée :
+
+- **1 box position** verte : entrée → **TP3** (la zone de profit globale).
+- **2 lignes** pointillées vertes aux niveaux **TP1** et **TP2** (cibles partielles dans la zone).
+- **1 box SL** rouge : entrée → SL.
+- **Pas de rendu pour le runner**.
+- Chaque élément **étend son bord droit bougie par bougie** tant que sa cible n'est pas atteinte / le
+  trade pas clôturé, puis se fige.
+- **Grisage de la box SL** dès qu'elle n'est plus le risque vivant : au **passage à BE** (TP1 atteint,
+  si BE activé) **ou** à la **sortie** du trade.
+- Tous les éléments d'un trade partagent le **même bord droit** (ils s'étendent jusqu'à la clôture du
+  trade) — la box SL ne fait que changer de couleur, elle ne s'arrête pas avant les autres.
+- **Boxes créées uniquement pour les trades réellement exécutés** : on attend la **confirmation du
+  fill** (dans `strategy.opentrades` / `closedtrades`). Un ordre stop **non filé** (extrême non cassé
+  dans la fenêtre → annulé, ou `qty` arrondie à 0) ne laisse **aucune trace** → le chart reflète le
+  backtest.
+- **Tracé de l'Open Range** (OR High / OR Low) du jour, pour contrôler visuellement la bougie / TZ
+  retenue par la stratégie.
+
+### 8. Garde-fous Pine
+
+- Détection **uniquement sur bougie fermée** (`barstate.isconfirmed`) → pas de repaint. L'entrée est
+  un **ordre marché** exécuté à la clôture de la bougie de signal (`process_orders_on_close = true`) ;
+  la `qty` est passée explicitement (sizing par risque), donc `default_qty_*` du `strategy(...)` est ignoré.
+- Le nombre de boxes vivantes est borné par `Trades max / jour` × jours backtestés (FIFO au-delà
+  de 500).
+
+### Settings
+
+**Général**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| TZ Open Range | string | `Europe/Paris` | TZ IANA |
+| Trades max / jour | int | 3 | 1-10 |
+| Risque par trade (%) | float | 1.0 | 0.05-100 |
+| Debug (franchissements OR) | bool | false | — |
+
+**Setups**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| Cassure (continuation) | bool | true | — |
+| Réintégration (fade) | bool | true | — |
+
+**Multiples SL / TP**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| TP1 / TP2 / TP3 cassure (×range) | float | 1.0 / 2.0 / 5.0 | ≥ 0.1 |
+| TP1 / TP3 réintég (×range) | float | 0.5 / 2.0 | ≥ 0.1 |
+| SL cassure (% range) | float | 55.0 | ≥ 0 (non capé) |
+| SL réintég (% mèche) | float | 50.0 | ≥ 0 (non capé) |
+
+**Répartition & gestion**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| Sortie TP1 / TP2 / TP3 (%) | int | 50 / 20 / 20 | 0-100 (somme ≤ 100) |
+| Runner (reliquat, sort au stop) | bool | true | — |
+| Passage à BE au TP1 | bool | true | — |
+
+### Cas de test (à valider manuellement dans TradingView)
+
+| # | Scénario | Attendu |
+|---|----------|---------|
+| 1 | Cassure haute nette + CMI bull sur la bougie de cassure | Entrée long, SL à 55 % sous orH, 3 TP + runner, boxes tracées |
+| 2 | Cassure basse + signal bear sur la bougie suivante (pas sur la cassure) | Entrée short dans la fenêtre 2 bougies |
+| 3 | Cassure sans aucun signal sur 2 bougies | Aucune entrée (setup expiré) |
+| 4 | Mèche au-dessus de orH puis clôture dedans + signal bear | Réintégration haute → short, SL = mèche extrême + 50 % |
+| 5 | N clôtures au-dessus de orH puis retour en clôture dans le range + signal bear | Réintégration haute (pas seulement le cas mèche) |
+| 6 | TP1 atteint | SL du reliquat ramené à BE (prix d'entrée) |
+| 7 | Plusieurs setups dans la journée jusqu'au plafond | Pyramiding jusqu'à « Trades max / jour », puis blocage |
+| 8 | Changement de jour avec position ouverte | Position laissée vivre, runner non clôturé d'office |
+| 9 | Instrument cash EU vs crypto 24 h | OR cohérent avec la TZ choisie (minuit de `tz`) |
