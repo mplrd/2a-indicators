@@ -681,6 +681,13 @@ réintégration) reste fixe (`orL` / `orH`).
   trade (%)`** de l'equity, quelle que soit la largeur du range/SL (`qty = equity·risk% / (distance
   entrée→SL · pointvalue)`). Comparable entre actifs. Écrase l'*Order size* de l'onglet Properties ;
   le rapport de perfs TradingView reste exact (calculé sur les fills réels).
+- **Levier (marge)** : le sizing par risque produit un **notionnel** (`qty·prix`) bien supérieur au
+  risque ; sans levier, TradingView **réduit ou rejette** tout ordre dont le notionnel dépasse
+  l'equity (cas fréquent quand le SL est serré). Règle : un ordre est finançable si la **distance du SL
+  en % du prix ≥ la marge %**. La stratégie fixe donc `margin_long = margin_short = 10` (**levier 10×**,
+  couvre tout SL ≥ 0,1 % du prix) pour que la qty par risque soit filée telle quelle. Le **risque
+  reste borné par le SL** (le levier n'augmente pas la perte au SL). Valeur **hardcodée** (pas un input) ;
+  baisser la marge si des trades ne filent toujours pas (5 → 20×, 2 → 50×).
 - Répartition par défaut **50 / 20 / 20 / 10 %** (TP1, TP2, TP3, runner), **paramétrable**. TP1+TP2+TP3
   doivent totaliser ≤ 100 % ; le reliquat alimente le **runner**, ou est ajouté à TP3 si le runner
   est désactivé.

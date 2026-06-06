@@ -22,6 +22,10 @@ strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
   initial_capital = 10000,
   calc_on_every_tick = false,
   process_orders_on_close = true,                       // entrée au marché à la CLÔTURE de la bougie-flèche
+  margin_long = 10, margin_short = 10,                  // levier 10× : le sizing par RISQUE pilote la qty (pas le capital).
+  // Sans levier, le NOTIONNEL (qty×prix) doit tenir dans l'equity : un SL serré → qty énorme → ordre réduit/rejeté.
+  // Règle : ordre finançable si distance_SL(%prix) ≥ marge%. Marge 10 % couvre tout SL ≥ 0,1 % du prix.
+  // Si des trades ne filent toujours pas : baisser la marge (5 → 20×, 2 → 50×). Le risque reste borné par le SL.
   max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 import mpilard/lib_levels/12 as levels
