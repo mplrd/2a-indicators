@@ -52,14 +52,23 @@ enableBreak = input.bool(true,  "Activer la cassure (continuation)", group = GRP
 tpBreak1    = input.float(1.0,  "TP1 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
 tpBreak2    = input.float(2.0,  "TP2 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
 tpBreak3    = input.float(5.0,  "TP3 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
-slBreakPct  = input.float(55.0, "SL (% range)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "% du range depuis la borne cassée. Non capé : >100 autorisé.")
+SL_RANGE = "% range"
+SL_HL    = "Plus haut/plus bas"
+slBreakMode = input.string(SL_RANGE, "Mode SL", options = [SL_RANGE, SL_HL], group = GRP_BREAK, tooltip = "« % range » : SL à X % du range depuis la borne cassée. « Plus haut/plus bas » : SL sur le plus bas (long) / plus haut (short) des N dernières bougies + tolérance.")
+slBreakPct  = input.float(55.0, "SL (% range)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "Mode « % range » : % du range depuis la borne cassée. Non capé : >100 autorisé.")
+slBreakLook = input.int(20,     "Lookback plus haut/bas (bougies)", group = GRP_BREAK, minval = 2, tooltip = "Mode « plus haut/plus bas » : nombre de bougies (courante incluse) pour le plus bas/haut.")
+slBreakTol  = input.float(25.0, "Tolérance SL (% range bougie)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "Mode « plus haut/plus bas » : buffer au-delà de l'extrême = ce % du range de la bougie qui a marqué l'extrême.")
 
 var string GRP_REINT = "Réintégration"
 enableReint = input.bool(true,   "Activer la réintégration (fade)", group = GRP_REINT)
 tpReint1    = input.float(0.5,   "TP1 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1)
 tpReint2    = input.float(1.0,   "TP2 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1, tooltip = "1.0 = borne opposée du range (l'ancien défaut figé).")
 tpReint3    = input.float(2.0,   "TP3 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1)
-slReintWick = input.float(100.0, "SL (% mèche)", group = GRP_REINT, minval = 0, step = 5, tooltip = "Fraction de la mèche de l'extrême de la bougie de réintégration, ajoutée au-delà (body si open en extrême). Non capé.")
+SL_WICK = "% mèche"
+slReintMode = input.string(SL_WICK, "Mode SL", options = [SL_WICK, SL_HL], group = GRP_REINT, tooltip = "« % mèche » : SL au-delà de l'extrême de la bougie de réintégration (+ X % de sa mèche). « Plus haut/plus bas » : SL sur le plus bas/haut des N dernières bougies + tolérance.")
+slReintWick = input.float(100.0, "SL (% mèche)", group = GRP_REINT, minval = 0, step = 5, tooltip = "Mode « % mèche » : fraction de la mèche de l'extrême de la bougie de réintégration, ajoutée au-delà (body si open en extrême). Non capé.")
+slReintLook = input.int(20,      "Lookback plus haut/bas (bougies)", group = GRP_REINT, minval = 2, tooltip = "Mode « plus haut/plus bas » : nombre de bougies (courante incluse) pour le plus bas/haut.")
+slReintTol  = input.float(25.0,  "Tolérance SL (% range bougie)", group = GRP_REINT, minval = 0, step = 1, tooltip = "Mode « plus haut/plus bas » : buffer au-delà de l'extrême = ce % du range de la bougie qui a marqué l'extrême.")
 
 var string GRP_POS = "Répartition & gestion"
 // Modes de break-even (const strings : servent aux options input.string ET aux comparaisons)
@@ -161,6 +170,18 @@ dayChange = ta.change(dayofmonth(time, orTz)) != 0
 R       = orH - orL
 orReady = orSeen and not na(orEnd) and not na(R) and R > 0 and time >= orEnd
 
+// SL « plus haut/plus bas » (mode alternatif par setup) — séries calculées CHAQUE barre (ta.* hors
+//   conditionnel). SL = plus bas (long) / plus haut (short) sur N bougies (courante incluse), ± un buffer
+//   = tolérance % du RANGE de la bougie qui a marqué l'extrême. Lookback/tolérance propres à chaque setup.
+brHLdL = math.abs(ta.lowestbars(low,   slBreakLook))
+brHLdS = math.abs(ta.highestbars(high, slBreakLook))
+slBreakHL_L = ta.lowest(low,   slBreakLook) - (high[brHLdL] - low[brHLdL]) * slBreakTol / 100.0
+slBreakHL_S = ta.highest(high, slBreakLook) + (high[brHLdS] - low[brHLdS]) * slBreakTol / 100.0
+reHLdL = math.abs(ta.lowestbars(low,   slReintLook))
+reHLdS = math.abs(ta.highestbars(high, slReintLook))
+slReintHL_L = ta.lowest(low,   slReintLook) - (high[reHLdL] - low[reHLdL]) * slReintTol / 100.0
+slReintHL_S = ta.highest(high, slReintLook) + (high[reHLdS] - low[reHLdS]) * slReintTol / 100.0
+
 // Helpers de rendu (box bornée + ligne horizontale, ancrées en bar_time, étendues manuellement)
 mkBox(int lt, float a, float b, color col) => box.new(left = lt, top = math.max(a, b), right = lt + oneBarMs, bottom = math.min(a, b), xloc = xloc.bar_time, border_color = color.new(col, 40), bgcolor = color.new(col, 85), border_width = 1, extend = extend.none, force_overlay = true)
 mkLine(int lt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = lt + oneBarMs, y2 = y, xloc = xloc.bar_time, color = color.new(col, 20), width = 1, style = line.style_dashed, force_overlay = true)
@@ -230,7 +251,7 @@ float dbgTrigDn = na   // bulle SHORT : extrême (bas) de la bougie de signal
 float dbgFill   = na   // (inutilisé pour l'instant)
 
 // SL/TP du signal de la bougie courante — mémorisés pour les redessiner à la flèche (bougie suivante).
-float sigSL  = na   // SL CASSURE (niveau du range). na si réintégration → SL calculé à la flèche.
+float sigSL  = na   // SL figé du setup sur sa bougie de signal (lu en [1] à la flèche), selon le Mode SL.
 float sigTP1 = na
 float sigTP2 = na
 float sigTP3 = na
@@ -301,14 +322,14 @@ if barstate.isconfirmed
         if enableBreak and firstCloseAbove
             triggered := true
             tDir   := 1
-            tSL    := orH - slBreakDist
+            tSL    := slBreakMode == SL_HL ? slBreakHL_L : orH - slBreakDist   // plus-bas N bougies OU % range
             tTP1   := orH + tpBreak1 * R
             tTP2   := orH + tpBreak2 * R
             tTP3   := orH + tpBreak3 * R
         else if enableBreak and firstCloseBelow
             triggered := true
             tDir   := -1
-            tSL    := orL + slBreakDist
+            tSL    := slBreakMode == SL_HL ? slBreakHL_S : orL + slBreakDist   // plus-haut N bougies OU % range
             tTP1   := orL - tpBreak1 * R
             tTP2   := orL - tpBreak2 * R
             tTP3   := orL - tpBreak3 * R
@@ -316,7 +337,7 @@ if barstate.isconfirmed
             triggered := true                                // cassure confirmée en haut puis retour dedans → short
             tDir   := -1
             upW = high - math.max(open, close)               // mèche HAUTE de la bougie de réintégration (la bulle)
-            tSL := high + (slReintWick / 100.0) * (upW > 0 ? upW : math.abs(open - close))   // SL au-dessus (body si open en extrême)
+            tSL := slReintMode == SL_HL ? slReintHL_S : high + (slReintWick / 100.0) * (upW > 0 ? upW : math.abs(open - close))   // plus-haut N bougies OU % mèche
             tTP1   := orH - tpReint1 * R
             tTP2   := orH - tpReint2 * R                     // 1.0 = orL (borne opposée), comme l'ancien figé
             tTP3   := orH - tpReint3 * R
@@ -326,7 +347,7 @@ if barstate.isconfirmed
             triggered := true                                // cassure confirmée en bas puis retour dedans → long
             tDir   := 1
             dnW = math.min(open, close) - low                // mèche BASSE de la bougie de réintégration (la bulle)
-            tSL := low - (slReintWick / 100.0) * (dnW > 0 ? dnW : math.abs(open - close))    // SL en-dessous (body si open en extrême)
+            tSL := slReintMode == SL_HL ? slReintHL_L : low - (slReintWick / 100.0) * (dnW > 0 ? dnW : math.abs(open - close))    // plus-bas N bougies OU % mèche
             tTP1   := orL + tpReint1 * R
             tTP2   := orL + tpReint2 * R                     // 1.0 = orH (borne opposée), comme l'ancien figé
             tTP3   := orL + tpReint3 * R
@@ -338,7 +359,7 @@ if barstate.isconfirmed
         if triggered
             cntTriggers += 1
             tEntry := tDir == 1 ? high : low                 // extrême de la bougie de signal (haut si long, bas si short)
-            sigSL  := tSL                                    // SL cassure (niveau range) ; na si réintégration
+            sigSL  := tSL                                    // SL figé du setup (% range / % mèche / plus haut-bas selon le mode)
             sigTP1 := tTP1
             sigTP2 := tTP2
             sigTP3 := tTP3

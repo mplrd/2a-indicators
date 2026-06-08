@@ -669,11 +669,22 @@ réintégration) reste fixe (`orL` / `orH`).
 | Réintég. haute | short | `exHigh + 0.5·exHighWick` | `orH − 0.5·R` (milieu) | `orL` (borne opposée) | `orH − 2·R` | BE only |
 | Réintég. basse | long  | `exLow − 0.5·exLowWick`   | `orL + 0.5·R` (milieu) | `orH` (borne opposée) | `orL + 2·R` | BE only |
 
-- **SL cassure** : exprimé en **% du range depuis la borne cassée** (`SL cassure (% range)`, défaut
-  **55 %** → `orH − 0.55·R` en long ; `orL + 0.55·R` en short). Saisie **non capée** : > 100 %
-  autorisé (SL au-delà de la borne opposée).
-- **SL réintégration** : l'extrême de l'excursion fadée (§2), avec une marge de **50 % de la mèche**
-  de la bougie qui a marqué cet extrême.
+**Mode SL — choisi indépendamment PAR setup** (`Mode SL` dans chaque groupe), pour tester selon l'actif :
+
+- **Cassure** — `% range` *(défaut)* **ou** `Plus haut/plus bas`.
+- **Réintégration** — `% mèche` *(défaut)* **ou** `Plus haut/plus bas`.
+
+Détail des modes :
+
+- **`% range` (cassure)** : SL à **% du range depuis la borne cassée** (`SL (% range)`, défaut **55 %**
+  → `orH − 0.55·R` en long ; `orL + 0.55·R` en short). Saisie **non capée** : > 100 % autorisé.
+- **`% mèche` (réintégration)** : l'extrême de l'excursion fadée (§2) + une marge de `SL (% mèche)` de
+  la mèche de la bougie qui a marqué cet extrême (défaut 100 %).
+- **`Plus haut/plus bas` (les deux setups)** : SL sur le **plus bas** (long) / **plus haut** (short)
+  des **N dernières bougies** (`Lookback`, défaut 20, **bougie courante incluse**, mèche), **± un buffer**
+  = `Tolérance` % du **range de la bougie qui a marqué cet extrême** (défaut 25 %). `Lookback` et
+  `Tolérance` sont **propres à chaque setup**. SL **figé à la bougie de signal** (pas trailing). Formule :
+  `slLong = lowest(low,N) − rangeBougieExtrême · tol%` ; `slShort = highest(high,N) + rangeBougieExtrême · tol%`.
 
 ### 6. Gestion de position
 
@@ -776,8 +787,12 @@ d'entrée :
 |---------|------|--------|-------|
 | TP1 / TP2 / TP3 cassure (×range) | float | 1.0 / 2.0 / 5.0 | ≥ 0.1 |
 | TP1 / TP3 réintég (×range) | float | 0.5 / 2.0 | ≥ 0.1 |
+| Mode SL cassure | string | `% range` | `% range` · `Plus haut/plus bas` |
 | SL cassure (% range) | float | 55.0 | ≥ 0 (non capé) |
-| SL réintég (% mèche) | float | 50.0 | ≥ 0 (non capé) |
+| Mode SL réintég | string | `% mèche` | `% mèche` · `Plus haut/plus bas` |
+| SL réintég (% mèche) | float | 100.0 | ≥ 0 (non capé) |
+| Lookback plus haut/bas — cassure / réintég (bougies) | int | 20 / 20 | ≥ 2 |
+| Tolérance SL (% range bougie) — cassure / réintég | float | 25.0 / 25.0 | ≥ 0 |
 
 **Répartition & gestion**
 
