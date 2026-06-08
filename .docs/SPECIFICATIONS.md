@@ -765,8 +765,12 @@ d'entrée :
   `strategy.opentrades`, `liveSize ≠ 0`), **ancrés à la bougie d'entrée**. Un ordre **non filé** (`qty`
   capée à 0 par le capital) est **purgé dès la barre suivante** et ne laisse **aucune trace** → le chart
   reflète exactement le backtest (pas de box ni de label vide pour une position qui n'existe pas).
-- **Tracé de l'Open Range** (OR High / OR Low) du jour, pour contrôler visuellement la bougie / TZ
-  retenue par la stratégie.
+- **Tracé de l'Open Range** (OR High / OR Low) du jour : lignes ancrées à `orStart` (même début que le
+  background ci-dessous) au niveau du range, étendues vers la droite. Contrôle visuel de la bougie / TZ.
+- **Zone de l'Open Range** : un **rectangle sans bordure**, rempli de la **couleur du range** (bleu) en
+  forte transparence, ancré à la **1re bougie** de la fenêtre (`orStart`) et borné aux bornes du range
+  (`orL`/`orH`). Il se **construit en live pendant la période de define** : top/bottom suivent le range
+  courant (running) et le bord droit s'étend bougie par bougie, jusqu'à `orEnd` où il se fige. Un par jour.
 
 ### 8. Garde-fous Pine
 

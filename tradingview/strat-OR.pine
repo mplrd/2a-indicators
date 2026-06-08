@@ -166,7 +166,7 @@ var int cntSkipQty   = 0   // skip : qty<=0 ou répartition invalide
 oneBarMs  = timeframe.in_seconds() * 1000
 dayChange = ta.change(dayofmonth(time, orTz)) != 0
 
-[orH, orL, _orStart, orEnd, orSeen] = levels.openRange(orTz)
+[orH, orL, orStart, orEnd, orSeen] = levels.openRange(orTz)
 R       = orH - orL
 orReady = orSeen and not na(orEnd) and not na(R) and R > 0 and time >= orEnd
 
@@ -226,8 +226,35 @@ if barstate.isconfirmed
 // ============================================================
 // Visualisation de l'Open Range + debug
 // ============================================================
-plot(orReady ? orH : na, "OR High", color = color.new(color.blue, 0), linewidth = 1, style = plot.style_linebr)
-plot(orReady ? orL : na, "OR Low",  color = color.new(color.blue, 0), linewidth = 1, style = plot.style_linebr)
+// OR High / OR Low : lignes au niveau du range, ANCRÉES à orStart (même début que le background) et
+//   étendues vers la droite. Un couple par jour (réf lâchée au nouveau jour, les précédentes restent figées).
+var line orHiLn = na
+var line orLoLn = na
+if dayChange
+    orHiLn := na
+    orLoLn := na
+if orReady
+    rxq = time + oneBarMs
+    if na(orHiLn)
+        orHiLn := line.new(orStart, orH, rxq, orH, xloc = xloc.bar_time, color = color.new(color.blue, 0), width = 1, force_overlay = true)
+        orLoLn := line.new(orStart, orL, rxq, orL, xloc = xloc.bar_time, color = color.new(color.blue, 0), width = 1, force_overlay = true)
+    else
+        line.set_x2(orHiLn, rxq)
+        line.set_x2(orLoLn, rxq)
+// Zone de l'Open Range : rectangle SANS bordure, ancré à la 1re bougie de la fenêtre (orStart) et borné
+//   aux bornes du range (orH/orL). Se CONSTRUIT EN LIVE pendant la période de define : top/bottom suivent
+//   le range COURANT (orH/orL running), bord droit étendu chaque barre, jusqu'à orEnd où il fige. Un par
+//   jour (réf lâchée au nouveau jour, la box précédente reste figée). Inline comme les plots OR.
+var box orZone = na
+if dayChange
+    orZone := na
+if orSeen and not na(orStart) and not na(orEnd) and time < orEnd
+    if na(orZone)
+        orZone := box.new(left = orStart, top = orH, right = time + oneBarMs, bottom = orL, xloc = xloc.bar_time, bgcolor = color.new(color.blue, 90), border_width = 0, force_overlay = true)
+    else
+        box.set_top(orZone, orH)
+        box.set_bottom(orZone, orL)
+        box.set_right(orZone, time + oneBarMs)
 // BULLES : ronds au niveau d'entrée potentiel — lime = signal long (cassure haute / réintég basse),
 //          rouge = signal short (cassure basse / réintég haute). Marquent les cassures et réintégrations.
 plot(debug ? dbgTrigUp : na, "Signal long",  color = color.new(color.lime, 0), style = plot.style_circles, linewidth = 3)
