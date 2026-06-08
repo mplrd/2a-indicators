@@ -11,6 +11,8 @@
 //   d'exposition restante (live, au niveau d'entrée). Dessin DIFFÉRÉ au fill : un ordre non filé ne laisse
 //   aucune trace → le chart reflète le backtest.
 // Debug : un toggle affiche les bulles + flèches de signal (n'altère ni la détection ni les entrées).
+// Timeframe : pensée M5/M15 (tolérance jusqu'à H1 inclus) ; AU-DESSUS DE H1 la strat se BYPASSE entièrement
+//   (aucun ordre, aucun tracé) — garde-fou `tfSupported`.
 //
 // Architecture — la strat n'est qu'un ORCHESTRATEUR moteur ; le métier vit dans les libs :
 //   - lib_strat_range : détection setups + géométrie SL/TP + swingStop + trigger d'entrée (range-agnostique).
@@ -165,6 +167,9 @@ var int cntSkipQty   = 0   // skip : qty<=0 ou répartition invalide
 // ============================================================
 oneBarMs  = timeframe.in_seconds() * 1000
 dayChange = ta.change(dayofmonth(time, orTz)) != 0
+// Garde-fou timeframe : stratégie pensée M5/M15 (tolérance jusqu'à H1 inclus). AU-DESSUS DE H1 → on
+//   BYPASSE tout (aucun ordre placé, aucun tracé) pour être sûr de ne rien exécuter sur un TF inadapté.
+tfSupported = timeframe.in_seconds() <= 3600
 
 [orH, orL, orStart, orEnd, orSeen] = levels.openRange(orTz)
 R       = orH - orL
@@ -214,7 +219,7 @@ sigTP2 = sig.triggered ? sig.tp2 : na
 sigTP3 = sig.triggered ? sig.tp3 : na
 
 // Compteur debug + reset du compteur de trades du jour (l'état d'excursion, lui, est reset DANS la lib).
-if barstate.isconfirmed
+if barstate.isconfirmed and tfSupported
     if sig.triggered
         cntTriggers += 1
     if dayChange
@@ -233,7 +238,7 @@ var line orLoLn = na
 if dayChange
     orHiLn := na
     orLoLn := na
-if orReady
+if orReady and tfSupported
     rxq = time + oneBarMs
     if na(orHiLn)
         orHiLn := line.new(orStart, orH, rxq, orH, xloc = xloc.bar_time, color = color.new(color.blue, 0), width = 1, force_overlay = true)
@@ -248,7 +253,7 @@ if orReady
 var box orZone = na
 if dayChange
     orZone := na
-if orSeen and not na(orStart) and not na(orEnd) and time < orEnd
+if tfSupported and orSeen and not na(orStart) and not na(orEnd) and time < orEnd
     if na(orZone)
         orZone := box.new(left = orStart, top = orH, right = time + oneBarMs, bottom = orL, xloc = xloc.bar_time, bgcolor = color.new(color.blue, 90), border_width = 0, force_overlay = true)
     else
@@ -257,20 +262,21 @@ if orSeen and not na(orStart) and not na(orEnd) and time < orEnd
         box.set_right(orZone, time + oneBarMs)
 // BULLES : ronds au niveau d'entrée potentiel — lime = signal long (cassure haute / réintég basse),
 //          rouge = signal short (cassure basse / réintég haute). Marquent les cassures et réintégrations.
-plot(debug ? dbgTrigUp : na, "Signal long",  color = color.new(color.lime, 0), style = plot.style_circles, linewidth = 3)
-plot(debug ? dbgTrigDn : na, "Signal short", color = color.new(color.red,  0), style = plot.style_circles, linewidth = 3)
+plot(tfSupported and debug ? dbgTrigUp : na, "Signal long",  color = color.new(color.lime, 0), style = plot.style_circles, linewidth = 3)
+plot(tfSupported and debug ? dbgTrigDn : na, "Signal short", color = color.new(color.red,  0), style = plot.style_circles, linewidth = 3)
 
 // FLÈCHES : la bougie de bulle (signal, [1]) est-elle cassée par la bougie courante (la flèche) ?
 //   Trigger d'entrée délégué à lib_strat_range : renvoie [déclenché, prix d'entrée].
 [breakUp, eUp] = stratRange.entryTrigger(dbgTrigUp[1],  1, breakOnClose)
 [breakDn, eDn] = stratRange.entryTrigger(dbgTrigDn[1], -1, breakOnClose)
-plotshape(debug and breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
-plotshape(debug and breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
+plotshape(tfSupported and debug and breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
+plotshape(tfSupported and debug and breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
 
 // VIE DE LA POSITION dessinée — uniquement sur bougie fermée (pas de doublon en temps réel).
 //   À chaque flèche on ouvre une position : entrée = close de la bougie-flèche si validation en
 //   clôture, sinon le niveau cassé (extrême de la bulle) ; SL/TP du signal figés sur la bulle (lus en [1]).
-if barstate.isconfirmed
+//   AU-DESSUS DE H1 : tout ce bloc est bypassé (`tfSupported`) → aucun ordre, aucune position dessinée.
+if barstate.isconfirmed and tfSupported
     // Résolution des entrées en attente : on ne DESSINE qu'une fois le fill confirmé (liveSize ≠ 0),
     //   ancré à la bougie d'entrée (p.t0). Tourne AVANT les plafonds pour que les fills soient comptés.
     //   Un ordre non filé (qty capée à 0 par le capital) est purgé dès la barre suivante → aucune trace.

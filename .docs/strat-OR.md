@@ -54,8 +54,10 @@ TradingView. Référence comportementale : `SPECIFICATIONS.md` § « Stratégie 
   détection ni les entrées.
 
 ### Limites
-- TF < H1 (l'OR reste la 1re heure). En `Les deux sens (hedge)`, le moteur Pine **nette** les positions
-  opposées → backtest fiable surtout en Long/Short/Net.
+- Pensée pour **M5 / M15** (tolérance jusqu'à **H1 inclus**). **Au-dessus de H1, la stratégie se bypasse
+  entièrement** (aucun ordre, aucun tracé) — garde-fou `tfSupported`.
+- En `Les deux sens (hedge)`, le moteur Pine **nette** les positions opposées → backtest fiable surtout
+  en Long/Short/Net.
 - Levier ≤ 100× (plafond technique de la marge `const`).
 
 ## 2. Choix d'implémentation
