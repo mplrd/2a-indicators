@@ -22,10 +22,9 @@ strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
   initial_capital = 10000,
   calc_on_every_tick = false,
   process_orders_on_close = true,                       // entrée au marché à la CLÔTURE de la bougie-flèche
-  margin_long = 10, margin_short = 10,                  // levier 10× : le sizing par RISQUE pilote la qty (pas le capital).
-  // Sans levier, le NOTIONNEL (qty×prix) doit tenir dans l'equity : un SL serré → qty énorme → ordre réduit/rejeté.
-  // Règle : ordre finançable si distance_SL(%prix) ≥ marge%. Marge 10 % couvre tout SL ≥ 0,1 % du prix.
-  // Si des trades ne filent toujours pas : baisser la marge (5 → 20×, 2 → 50×). Le risque reste borné par le SL.
+  margin_long = 1, margin_short = 1,                    // plafond TECHNIQUE : marge 1 % = 100× max (Pine exige un const ici).
+  // Le levier OPÉRATIONNEL est l'input « Levier (×) » : il cape la qty (notionnel ≤ levier × equity), donc aucun
+  // rejet broker tant que le levier choisi reste ≤ 100×. Le sizing par RISQUE pilote la qty, le levier en est le plafond.
   max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 import mpilard/lib_levels/12 as levels
@@ -44,6 +43,7 @@ DIR_SHORT = "Short seul"
 DIR_NET   = "Sens unique (net, anti-hedge)"
 dirMode   = input.string(DIR_BOTH, "Sens / hedge", options = [DIR_BOTH, DIR_LONG, DIR_SHORT, DIR_NET], group = GRP_GEN, tooltip = "Les deux sens (hedge) : on DESSINE les deux ; ⚠ le moteur n'a qu'une position nette (il nette les sens opposés) → backtest fiable surtout en Long/Short/Net. Long/Short seul : un seul sens. Sens unique (net) : refuse un setup opposé à la position en cours.")
 riskPct   = input.float(1.0,             "Risque par trade (%)", group = GRP_GEN, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
+maxLev    = input.float(10.0,            "Levier (×)", group = GRP_GEN, minval = 1.0, maxval = 100.0, step = 1.0, tooltip = "Plafond de levier : cape la taille pour que le notionnel (qty×prix) ≤ levier × equity. Le sizing par risque réclame souvent un gros notionnel (SL serré) ; au-delà de ce levier la qty est capée (le risque réel devient < cible). 1× = compte cash sans levier.")
 debug     = input.bool(false,            "Debug (afficher les bulles de signal)", group = GRP_GEN, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
 breakOnClose = input.bool(false,         "Cassure de bougie validée en CLÔTURE (sinon mèche/séance)", group = GRP_GEN, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
 
@@ -182,11 +182,14 @@ openPos(string id, int dir, float entry, float sl, float tp1, float tp2, float t
     lb  = label.new(x = rt, y = entry, xloc = xloc.bar_time, text = "", style = label.style_label_left, color = color.new(col, 20), textcolor = color.white, size = size.small, force_overlay = true)
     array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, runner = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2, lnRun = lr, lbRun = lb))
 
-// Taille par RISQUE : qty telle que la perte au SL (distance entrée↔SL × valeur du point) = riskPct% de l'equity.
-//   Retourne 0 si la distance est nulle (setup dégénéré → on n'ouvre pas). Écrase l'Order size des Propriétés.
+// Taille par RISQUE : qty telle que la perte au SL (distance entrée↔SL × valeur du point) = riskPct% de l'equity,
+//   CAPÉE par le levier (notionnel = qty×prix ≤ maxLev × equity). Retourne 0 si la distance est nulle (setup
+//   dégénéré → on n'ouvre pas). Écrase l'Order size des Propriétés.
 riskQty(float entry, float sl) =>
-    d = math.abs(entry - sl)
-    d > 0 ? (strategy.equity * riskPct / 100.0) / (d * syminfo.pointvalue) : 0.0
+    d   = math.abs(entry - sl)
+    rb  = d > 0 ? (strategy.equity * riskPct / 100.0) / (d * syminfo.pointvalue) : 0.0
+    cap = entry > 0 ? (strategy.equity * maxLev) / (entry * syminfo.pointvalue) : rb   // plafond de levier
+    math.min(rb, cap)
 
 // Estompe une position FERMÉE (transparence accrue) pour la faire reculer visuellement.
 //   SL : reste GRIS si le trade a atteint BE (slGreyed) — sortie à BE = non-événement discret ;

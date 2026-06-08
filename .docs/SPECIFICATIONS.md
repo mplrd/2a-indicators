@@ -683,11 +683,13 @@ réintégration) reste fixe (`orL` / `orH`).
   le rapport de perfs TradingView reste exact (calculé sur les fills réels).
 - **Levier (marge)** : le sizing par risque produit un **notionnel** (`qty·prix`) bien supérieur au
   risque ; sans levier, TradingView **réduit ou rejette** tout ordre dont le notionnel dépasse
-  l'equity (cas fréquent quand le SL est serré). Règle : un ordre est finançable si la **distance du SL
-  en % du prix ≥ la marge %**. La stratégie fixe donc `margin_long = margin_short = 10` (**levier 10×**,
-  couvre tout SL ≥ 0,1 % du prix) pour que la qty par risque soit filée telle quelle. Le **risque
-  reste borné par le SL** (le levier n'augmente pas la perte au SL). Valeur **hardcodée** (pas un input) ;
-  baisser la marge si des trades ne filent toujours pas (5 → 20×, 2 → 50×).
+  l'equity (cas fréquent quand le SL est serré). Le **levier est un input** (`Levier (×)`, défaut **10×**)
+  qui **cape la taille** : `qty` telle que `notionnel (qty·prix) ≤ levier · equity`. Tant que la qty par
+  risque tient sous ce plafond, elle est filée telle quelle ; au-delà elle est **capée** (le risque réel
+  devient alors < cible — contrainte réaliste du levier). Mise en œuvre : `margin_long = margin_short = 1`
+  (**const** imposé par Pine — un input lève CE10123 ; sert de **plafond technique** ~100×), et le cap
+  `levier · equity` est appliqué dans `riskQty`, ce qui évite tout rejet broker tant que `Levier (×) ≤ 100`.
+  Le **risque reste borné par le SL** (le levier n'augmente pas la perte au SL).
 - Répartition par défaut **50 / 20 / 20 / 10 %** (TP1, TP2, TP3, runner), **paramétrable**. TP1+TP2+TP3
   doivent totaliser ≤ 100 % ; le reliquat alimente le **runner**, ou est ajouté à TP3 si le runner
   est désactivé.
@@ -755,7 +757,11 @@ d'entrée :
 | TZ Open Range | string | `Europe/Paris` | TZ IANA |
 | Trades max / jour | int | 3 | 1-10 |
 | Risque par trade (%) | float | 1.0 | 0.05-100 |
+| Levier (×) | float | 10.0 | 1-100 |
 | Debug (franchissements OR) | bool | false | — |
+
+> Le **levier** cape la taille (`notionnel ≤ levier · equity`). `margin_long`/`margin_short` restent
+> `const` (≈ plafond 100×, imposé par Pine — CE10123 si input) ; c'est l'input `Levier (×)` qui pilote.
 
 **Setups**
 
