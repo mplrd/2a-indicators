@@ -779,6 +779,10 @@ d'entrée :
   la `qty` est passée explicitement (sizing par risque), donc `default_qty_*` du `strategy(...)` est ignoré.
 - Le nombre de boxes vivantes est borné par `Trades max / jour` × jours backtestés (FIFO au-delà
   de 500).
+- **Garde-fou timeframe** (`tfSupported = timeframe.in_seconds() ≤ 3600`) : la stratégie est pensée pour
+  le **M5 / M15** (tolérance jusqu'à **H1 inclus**). **Au-dessus de H1**, tout est **bypassé** — aucun
+  ordre placé, aucun tracé (zone OR, lignes, positions, bulles, flèches) — pour garantir qu'elle ne prend
+  rien sur un TF inadapté. (La détection interne continue de tourner mais sa sortie n'est pas exploitée.)
 
 ### Settings
 
