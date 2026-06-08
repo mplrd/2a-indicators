@@ -28,8 +28,9 @@ strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
   max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
 import mpilard/lib_levels/12      as levels
-import mpilard/lib_strat_range/1  as stratRange   // setups de range (détection pure) — publier en v1
-import mpilard/lib_strat_draw/1   as stratDraw    // rendu position générique — publier en v1
+import mpilard/lib_strat_range/2  as stratRange   // setups de range (détection + trigger d'entrée) — republier en v2
+import mpilard/lib_strat_draw/1   as stratDraw    // rendu position générique
+import mpilard/lib_risk/1         as risk         // gestion du risque (sizing, BE/runner, exposition) — publier en v1
 
 // ============================================================
 // Inputs
@@ -89,6 +90,10 @@ earlyBEPct = input.float(1.0, "BE anticipée — % prix dans notre sens", group 
 
 var string GRP_DBG = "Debug"
 debug     = input.bool(false, "Afficher bulles + flèches de signal", group = GRP_DBG, tooltip = "Affiche les ronds (bulles) sur les cassures/réintégrations détectées ET les flèches d'entrée (cassure de la bulle). N'altère pas la détection ni les entrées.")
+
+// Mapping des input.string vers les enums de lib_risk (cf. lib_risk.DirMode / BeMode).
+risk.DirMode dmRisk = dirMode == DIR_LONG ? risk.DirMode.LONG : dirMode == DIR_SHORT ? risk.DirMode.SHORT : dirMode == DIR_NET ? risk.DirMode.NET : risk.DirMode.BOTH
+risk.BeMode  bmRisk = beMode  == BE_TP1 ? risk.BeMode.AT_TP1 : beMode == BE_EARLY ? risk.BeMode.EARLY : risk.BeMode.NONE
 
 // ============================================================
 // Constantes
@@ -166,14 +171,8 @@ openPos(string id, int dir, float entry, float sl, float tp1, float tp2, float t
     pd = stratDraw.newPositionDraw(lt, oneBarMs, RUN_LEAD, dir, entry, sl, tp1, tp2, tp3, qtyTP1 > 0, qtyTP2 > 0)
     array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, runner = false, pd = pd))
 
-// Taille par RISQUE : qty telle que la perte au SL (distance entrée↔SL × valeur du point) = riskPct% de l'equity,
-//   CAPÉE par le levier (notionnel = qty×prix ≤ maxLev × equity). Retourne 0 si la distance est nulle (setup
-//   dégénéré → on n'ouvre pas). Écrase l'Order size des Propriétés.
-riskQty(float entry, float sl) =>
-    d   = math.abs(entry - sl)
-    rb  = d > 0 ? (strategy.equity * riskPct / 100.0) / (d * syminfo.pointvalue) : 0.0
-    cap = entry > 0 ? (strategy.equity * maxLev) / (entry * syminfo.pointvalue) : rb   // plafond de levier
-    math.min(rb, cap)
+// (Sizing par risque + cap levier → risk.riskSize. Le moteur — strategy.equity, syminfo.pointvalue —
+//  est lu ici et passé à la lib.)
 
 // Taille réellement encore ouverte pour un ordre d'entrée (somme des positions moteur portant cet id).
 //   Signée : négative pour un short. Alimente le label « taille restante » du rayon (décroît aux TP filés).
@@ -228,11 +227,10 @@ plot(orReady ? orL : na, "OR Low",  color = color.new(color.blue, 0), linewidth 
 plot(debug ? dbgTrigUp : na, "Signal long",  color = color.new(color.lime, 0), style = plot.style_circles, linewidth = 3)
 plot(debug ? dbgTrigDn : na, "Signal short", color = color.new(color.red,  0), style = plot.style_circles, linewidth = 3)
 
-// FLÈCHES : la bougie de bulle est-elle cassée par la bougie SUIVANTE (celle-ci) ?
-//   - bulle verte (long) cassée par le HAUT  : high de cette bougie > high de la bulle  → flèche up
-//   - bulle rouge (short) cassée par le BAS   : low de cette bougie  < low de la bulle   → flèche down
-breakUp = not na(dbgTrigUp[1]) and (breakOnClose ? close > dbgTrigUp[1] : high > dbgTrigUp[1])
-breakDn = not na(dbgTrigDn[1]) and (breakOnClose ? close < dbgTrigDn[1] : low  < dbgTrigDn[1])
+// FLÈCHES : la bougie de bulle (signal, [1]) est-elle cassée par la bougie courante (la flèche) ?
+//   Trigger d'entrée délégué à lib_strat_range : renvoie [déclenché, prix d'entrée].
+[breakUp, eUp] = stratRange.entryTrigger(dbgTrigUp[1],  1, breakOnClose)
+[breakDn, eDn] = stratRange.entryTrigger(dbgTrigDn[1], -1, breakOnClose)
 plotshape(debug and breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
 plotshape(debug and breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
 
@@ -265,11 +263,12 @@ if barstate.isconfirmed
         if not t.runner
             openCount += 1
             netDir := t.dir
-    allowLong  = validSplit and dirMode != DIR_SHORT and (dirMode != DIR_NET or netDir >= 0)
-    allowShort = validSplit and dirMode != DIR_LONG  and (dirMode != DIR_NET or netDir <= 0)
+    // Filtre d'exposition (hedge/net) → lib_risk ; ANDé avec validSplit (validité de la répartition, strat-local).
+    [allowLongDir, allowShortDir] = risk.directionAllowed(dmRisk, netDir)
+    allowLong  = validSplit and allowLongDir
+    allowShort = validSplit and allowShortDir
     if breakUp and tradesToday < tradesMax and openCount < maxOpen and allowLong
-        eUp = breakOnClose ? close : dbgTrigUp[1]
-        qUp = riskQty(eUp, sigSL[1])
+        qUp = risk.riskSize(strategy.equity, eUp, sigSL[1], syminfo.pointvalue, riskPct, maxLev)
         if sigTP1[1] > eUp and qUp > 0                   // TP1 devant l'entrée (long) + taille calculable
             eid = str.tostring(bar_index) + "L"
             strategy.entry(eid, strategy.long, qty = qUp)   // marché à la clôture, taille par risque
@@ -277,8 +276,7 @@ if barstate.isconfirmed
             tradesToday += 1
             cntPlaced += 1
     if breakDn and tradesToday < tradesMax and openCount < maxOpen and allowShort
-        eDn = breakOnClose ? close : dbgTrigDn[1]
-        qDn = riskQty(eDn, sigSL[1])
+        qDn = risk.riskSize(strategy.equity, eDn, sigSL[1], syminfo.pointvalue, riskPct, maxLev)
         if sigTP1[1] < eDn and qDn > 0                   // TP1 devant l'entrée (short) + taille calculable
             eid = str.tostring(bar_index) + "S"
             strategy.entry(eid, strategy.short, qty = qDn)
@@ -304,24 +302,15 @@ if barstate.isconfirmed
                     strategy.exit("t3" + t.id, from_entry = t.id, qty_percent = p3eff, stop = stopNow, limit = t.tp3)
                 if runnerPct > 0
                     strategy.exit("tr" + t.id, from_entry = t.id, qty_percent = runnerPct, stop = stopNow)
-                stopHit = t.dir == 1 ? low  <= stopNow : high >= stopNow
-                tp3Hit  = t.dir == 1 ? high >= t.tp3   : low  <= t.tp3
-                // Transitions d'ÉTAT moteur — les ÉVÉNEMENTS (naissance runner, BE armé, clôture) sont passés au rendu.
-                bool runnerBirth = false
-                bool beArm       = false
+                // Décisions de gestion du risque (sortie / BE / runner) → lib_risk (pur). La strat les APPLIQUE.
+                [stopHit, tp3Hit, beArm, runnerBirth] = risk.positionEvents(t.dir, t.entry, t.tp1, t.tp3, stopNow, runnerPct, bmRisk, earlyBEPct, t.slGreyed, t.runner)
                 if stopHit or (runnerPct == 0 and tp3Hit)
                     t.closed := true                             // sortie : stop/BE (toute phase) ou TP3 sans runner
                 else
-                    if runnerPct > 0 and tp3Hit and not t.runner
+                    if runnerBirth
                         t.runner := true                         // TP3 atteint → reliquat runner (ne compte plus comme position en cours)
-                        runnerBirth := true
-                    if not t.slGreyed
-                        beEarlyLvl = t.dir == 1 ? t.entry * (1 + earlyBEPct / 100.0) : t.entry * (1 - earlyBEPct / 100.0)
-                        beEarly    = beMode == BE_EARLY and (t.dir == 1 ? high >= beEarlyLvl : low <= beEarlyLvl)
-                        beAtTp1    = beMode == BE_TP1   and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
-                        if beEarly or beAtTp1
-                            t.slGreyed := true                   // BE armé (état moteur ; le grisage visuel est fait par le rendu)
-                            beArm := true
+                    if beArm
+                        t.slGreyed := true                       // BE armé (état moteur ; le grisage visuel est fait par le rendu)
                 // Rendu (lib_strat_draw) : extension, taille live, freeze au TP3, grisage BE, suppression du rayon à la sortie.
                 ls = liveSize(t.id)
                 sizeText = ls != 0 ? str.tostring(ls, "#.###") : ""

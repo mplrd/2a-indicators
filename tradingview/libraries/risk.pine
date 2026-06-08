@@ -1,0 +1,87 @@
+//@version=6
+// @description lib-risk — gestion du RISQUE / d'exposition, générique à toute stratégie (indépendante du
+//   setup : range, combo, ...). Couche 1 : pur, aucune dépendance, ne lit aucun `input.*`, ne dessine rien,
+//   n'appelle aucun `strategy.*` (equity & co sont passés en paramètres ; le caller applique les décisions).
+library("lib_risk", overlay = true)
+
+// ============================================================
+// Enums (mappés depuis les input.string du caller, cf. lib_signal.SignalKind)
+// ============================================================
+
+// @enum Mode de passage à break-even.
+export enum BeMode
+    NONE      // stop fixe au SL
+    AT_TP1    // BE quand le prix atteint TP1
+    EARLY     // BE quand le prix a parcouru un % en notre faveur (avant TP1)
+
+// @enum Politique de direction / exposition.
+export enum DirMode
+    BOTH      // les deux sens (hedge dessiné ; moteur nette)
+    LONG      // long seul
+    SHORT     // short seul
+    NET       // sens unique : refuse un setup opposé à la position en cours
+
+// ============================================================
+// Sizing
+// ============================================================
+
+// @function Taille par RISQUE constant, capée par le levier. La perte au SL (distance entrée↔SL ×
+//           valeur du point) vaut `riskPct` % de l'equity ; la taille est plafonnée pour que le
+//           notionnel (qty × prix) ≤ `maxLev` × equity (sinon l'ordre serait réduit/rejeté sans levier).
+// @param equity     Equity courante (passée par le caller : `strategy.equity`).
+// @param entry      Prix d'entrée.
+// @param sl         Niveau de stop-loss.
+// @param pointvalue Valeur du point de l'instrument (`syminfo.pointvalue`).
+// @param riskPct    Risque par trade en % de l'equity.
+// @param maxLev     Levier maximum (plafonne le notionnel).
+// @returns Quantité (float). 0 si la distance entrée↔SL est nulle (setup dégénéré → ne pas ouvrir).
+export riskSize(series float equity, series float entry, series float sl, simple float pointvalue, simple float riskPct, simple float maxLev) =>
+    d   = math.abs(entry - sl)
+    rb  = d > 0 ? (equity * riskPct / 100.0) / (d * pointvalue) : 0.0
+    cap = entry > 0 ? (equity * maxLev) / (entry * pointvalue) : rb   // plafond de levier (notionnel ≤ maxLev × equity)
+    math.min(rb, cap)
+
+// ============================================================
+// Exposition / direction
+// ============================================================
+
+// @function Sens autorisés selon la politique d'exposition et le sens des positions en cours.
+// @param dirMode Politique (BOTH / LONG / SHORT / NET).
+// @param netDir  Sens des positions en cours (+1 long / -1 short / 0 aucune). Ne sert qu'en mode NET.
+// @returns [allowLong, allowShort].
+export directionAllowed(DirMode dirMode, series int netDir) =>
+    allowLong  = dirMode != DirMode.SHORT and (dirMode != DirMode.NET or netDir >= 0)
+    allowShort = dirMode != DirMode.LONG  and (dirMode != DirMode.NET or netDir <= 0)
+    [allowLong, allowShort]
+
+// ============================================================
+// Gestion d'une position ouverte (événements de barre)
+// ============================================================
+
+// @function Décisions de gestion du risque sur une position ouverte, pour la barre courante. Fonction
+//           PURE : renvoie des événements ; le caller les applique au moteur (sortie, BE, runner) et au
+//           rendu. `beArm` respecte `not slGreyed` (n'arme qu'une fois) ; `runnerBirth` respecte
+//           `not runner` (ne naît qu'une fois). La CLÔTURE est décidée par le caller à partir de
+//           `stopHit` et de sa propre règle runner (ex. `stopHit or (runnerPct == 0 and tp3Hit)`).
+// @param dir        +1 long / -1 short.
+// @param entry      Prix d'entrée.
+// @param tp1        Cible 1 (déclencheur du BE « au TP1 »).
+// @param tp3        Cible 3 (déclencheur de la naissance du runner).
+// @param stopNow    Stop courant (SL d'origine, ou entrée si BE déjà armé).
+// @param runnerPct  % de reliquat runner (0 = pas de runner → sortie au TP3).
+// @param beMode     Mode de break-even.
+// @param earlyBEPct Seuil du BE anticipé, en % du prix d'entrée (mode EARLY).
+// @param slGreyed   BE déjà armé ?
+// @param runner     Reliquat runner déjà né (TP3 déjà atteint) ?
+// @returns [stopHit, tp3Hit, beArm, runnerBirth].
+export positionEvents(series int dir, series float entry, series float tp1, series float tp3, series float stopNow, simple float runnerPct, BeMode beMode, simple float earlyBEPct, series bool slGreyed, series bool runner) =>
+    stopHit = dir == 1 ? low  <= stopNow : high >= stopNow
+    tp3Hit  = dir == 1 ? high >= tp3     : low  <= tp3
+    bool beArm = false
+    if not slGreyed
+        beEarlyLvl = dir == 1 ? entry * (1 + earlyBEPct / 100.0) : entry * (1 - earlyBEPct / 100.0)
+        beEarly    = beMode == BeMode.EARLY  and (dir == 1 ? high >= beEarlyLvl : low <= beEarlyLvl)
+        beAtTp1    = beMode == BeMode.AT_TP1 and (dir == 1 ? high >= tp1 : low <= tp1)
+        beArm := beEarly or beAtTp1
+    runnerBirth = runnerPct > 0 and tp3Hit and not runner
+    [stopHit, tp3Hit, beArm, runnerBirth]

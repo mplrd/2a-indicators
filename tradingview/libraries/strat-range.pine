@@ -25,6 +25,27 @@ export swingStop(simple int length, simple float tolPct, simple int dir) =>
     dir > 0 ? ll - (high[dl] - low[dl]) * tolPct / 100.0 : hh + (high[dh] - low[dh]) * tolPct / 100.0
 
 // ============================================================
+// Déclenchement de l'entrée (bulle → flèche)
+// ============================================================
+
+// @function Confirme l'entrée d'un setup armé à la barre PRÉCÉDENTE (« bulle ») : la bougie courante
+//           (« flèche ») casse-t-elle le niveau de référence de la bulle, dans le sens du trade ?
+//           Le caller passe le niveau de la bulle déjà décalé (`[1]`).
+// @param prevLevel    Niveau de référence de la bulle (extrême de la bougie de signal), lu en `[1]` ; `na` si pas de bulle.
+// @param dir          +1 (cassure par le HAUT) / -1 (cassure par le BAS).
+// @param breakOnClose true → la flèche doit CLÔTURER au-delà ; false → la mèche suffit (franchissement en séance).
+// @returns [fired, price] — `fired` = entrée déclenchée ; `price` = prix d'entrée (close si breakOnClose, sinon le niveau de la bulle).
+export entryTrigger(series float prevLevel, simple int dir, simple bool breakOnClose) =>
+    bool  fired = false
+    float price = na
+    if not na(prevLevel)
+        broke = dir == 1 ? (breakOnClose ? close > prevLevel : high > prevLevel) : (breakOnClose ? close < prevLevel : low < prevLevel)
+        if broke
+            fired := true
+            price := breakOnClose ? close : prevLevel
+    [fired, price]
+
+// ============================================================
 // Setup de range
 // ============================================================
 

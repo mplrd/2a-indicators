@@ -663,9 +663,10 @@ L'entrée n'est **pas** déclenchée par un pattern `lib_signal`. Elle se fait e
 - Chaque famille de setup a son toggle (`Activer la cassure`, `Activer la réintégration`).
 - `lib_signal` n'est **pas** utilisé par cette stratégie.
 
-> **Découpage en libs** : la détection des setups + la géométrie SL/TP vivent dans **`lib_strat_range`**
-> (Couche 1, range-agnostique) ; le **timing d'entrée** ci-dessus (bulle→flèche, `breakOnClose`, sizing)
-> reste **orchestré par la stratégie**.
+> **Découpage en libs** : la détection des setups + la géométrie SL/TP + le **trigger bulle→flèche**
+> (`entryTrigger`) vivent dans **`lib_strat_range`** (C1, range-agnostique) ; le **sizing** dans
+> **`lib_risk`**. La stratégie ne fait qu'**orchestrer le moteur** : lire le trigger, appeler
+> `strategy.entry/exit`, tenir les arrays et piloter le rendu (`lib_strat_draw`).
 
 ### 5. Géométrie SL / TP (`R = orH − orL`)
 
@@ -698,6 +699,11 @@ Détail des modes :
   `slLong = lowest(low,N) − rangeBougieExtrême · tol%` ; `slShort = highest(high,N) + rangeBougieExtrême · tol%`.
 
 ### 6. Gestion de position
+
+> **Architecture** : la gestion du risque (sizing, BE/runner, filtre d'exposition hedge/net) est
+> **générique à toute stratégie** → extraite dans **`lib_risk`** (`riskSize`, `positionEvents`,
+> `directionAllowed`, enums `BeMode`/`DirMode`). La stratégie lit le moteur (`strategy.equity`,
+> `syminfo.pointvalue`, positions ouvertes) et **applique** les décisions retournées par la lib.
 
 - **Sizing par risque constant** : la taille est calculée pour que la **perte au SL = `Risque par
   trade (%)`** de l'equity, quelle que soit la largeur du range/SL (`qty = equity·risk% / (distance
