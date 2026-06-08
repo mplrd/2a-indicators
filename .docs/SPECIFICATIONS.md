@@ -632,29 +632,40 @@ sur la **1ʳᵉ clôture au-delà de la borne** (la « bougie qui casse ») — 
 dehors (sinon le setup resterait armé des heures et entrerait très loin de la cassure). Le prix doit
 **revenir puis recasser** pour ré-armer.
 
-### 4. Entrée — ordre MARCHÉ à la clôture de la bougie de signal
+### 4. Entrée — modèle bulle → flèche (sur 2 bougies)
 
-L'entrée n'est **pas** déclenchée par un pattern `lib_signal`. Dès que la **bougie de signal** clôture
-(la bougie qui casse pour une cassure ; celle qui réintègre pour une réintégration), on entre **au
-marché à sa clôture**, dans le sens du trade (`strategy.entry` sans `stop=`, avec
-`process_orders_on_close = true`) :
+> Aligné sur le **code validé** (le modèle « entrée au marché à la clôture du signal » d'une version
+> antérieure de cette spec ne correspond pas à l'implémentation).
 
-| Setup | Sens | Déclencheur (clôture) |
-|-------|------|------------------------|
-| Cassure haute | long  | `close > orH` (1ʳᵉ clôture au-dessus) |
-| Cassure basse | short | `close < orL` (1ʳᵉ clôture en-dessous) |
-| Réintégration haute | short | sortie haute puis `close` revient dans le range |
-| Réintégration basse | long  | sortie basse puis `close` revient dans le range |
+L'entrée n'est **pas** déclenchée par un pattern `lib_signal`. Elle se fait en **deux temps** :
 
-- Le **prix d'entrée = la clôture** de la bougie de signal (donc **BE = ce close**). SL/TP figés au
-  moment de l'entrée.
-- **Pas d'ordre stop en attente, donc pas d'invalidation pré-entrée** : la bougie qui clôture
-  hors/dans le range **EST** l'exécution. (Historique : une 1ʳᵉ version posait un ordre stop sur la
-  mèche de la bougie — il ne filait quasi jamais, ~2 trades sur 6 mois. Abandonné.)
-- **Garde-fou** : on n'entre que si le **TP1 est encore devant l'entrée** (`tpAhead`) — sécurité pour
-  garantir toutes les cibles du bon côté.
-- Chaque famille de setup a son toggle (`Cassure`, `Réintégration`) pour l'isoler en backtest.
-- `lib_signal` n'est **plus** utilisé par cette stratégie.
+1. **Bulle** (bougie de signal) : la détection (§3) arme un setup et fige son **niveau de référence =
+   l'extrême de la bougie de signal** (haut si long, bas si short), ainsi que ses SL/TP. C'est la
+   « bulle » (marqueur de debug).
+2. **Flèche** (bougie suivante) : on **entre au marché** dès que cette bougie **casse l'extrême de la
+   bulle** dans le sens du trade. `breakOnClose` règle la condition de cassure :
+   - décoché *(défaut)* : il suffit que la **mèche** franchisse l'extrême en séance ;
+   - coché : la bougie doit **clôturer** au-delà de l'extrême.
+
+| Setup | Sens | Niveau de la bulle (cassé par la flèche) |
+|-------|------|------------------------------------------|
+| Cassure haute | long  | haut de la bougie qui a clôturé au-dessus de `orH` |
+| Cassure basse | short | bas de la bougie qui a clôturé sous `orL` |
+| Réintégration haute | short | bas de la bougie qui a réintégré (depuis le haut) |
+| Réintégration basse | long  | haut de la bougie qui a réintégré (depuis le bas) |
+
+- **Prix d'entrée** = la **clôture** de la bougie-flèche (`breakOnClose` coché) **ou** le **niveau de la
+  bulle** (l'extrême cassé). **BE = ce prix d'entrée.** SL/TP figés sur la bulle (lus en `[1]` à la flèche).
+- **Garde-fou** : on n'entre que si le **TP1 est encore devant l'entrée** (sécurité pour garantir
+  toutes les cibles du bon côté) ; sinon le setup est ignoré.
+- **Sizing par risque + levier** appliqués à la flèche (cf. §6). Un ordre non finançable (qty 0) ne
+  laisse aucune trace (cf. §7, dessin différé).
+- Chaque famille de setup a son toggle (`Activer la cassure`, `Activer la réintégration`).
+- `lib_signal` n'est **pas** utilisé par cette stratégie.
+
+> **Découpage en libs** : la détection des setups + la géométrie SL/TP vivent dans **`lib_strat_range`**
+> (Couche 1, range-agnostique) ; le **timing d'entrée** ci-dessus (bulle→flèche, `breakOnClose`, sizing)
+> reste **orchestré par la stratégie**.
 
 ### 5. Géométrie SL / TP (`R = orH − orL`)
 

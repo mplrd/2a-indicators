@@ -1,0 +1,158 @@
+//@version=6
+// @description lib-strat-draw — rendu GÉNÉRIQUE d'une position de stratégie (identique quelle que soit la
+//   strat) : box zone de profit (entrée→TP3), box SL (entrée→SL), lignes TP1/TP2, et un RAYON matérialisant
+//   l'exposition restante à son niveau d'entrée (étiquette = taille restante). Couche 2 : ne fait QUE dessiner
+//   ce qu'on lui passe — aucune logique métier, aucun `input.*`, aucun appel moteur (`strategy.*`).
+//   Le caller calcule les ÉVÉNEMENTS (TP3 atteint, BE armé, clôturé, taille live) ; la lib les rend.
+library("lib_strat_draw", overlay = true)
+
+// ============================================================
+// Palette (transparences)
+// ============================================================
+COL_PROFIT = color.green
+COL_STOP   = color.red
+COL_GREY   = color.gray
+A_BG_LIVE  = 85   // fond box vivante
+A_BD_LIVE  = 40   // bordure box vivante
+A_BG_DONE  = 92   // fond box fermée (estompée)
+A_BD_DONE  = 70   // bordure / ligne fermée
+A_LINE     = 20   // ligne TP pointillée vivante
+A_RAY      = 10   // rayon d'exposition vivant
+A_LBL      = 20   // étiquette d'exposition
+A_GREY_BG  = 85   // box SL grisée (BE armé, position VIVANTE)
+A_GREY_BD  = 45
+
+// ============================================================
+// UDT — objets graphiques + état visuel d'une position dessinée
+// ============================================================
+
+// @type Handles graphiques + état d'affichage d'une position. Créé par `newPositionDraw`, mis à jour
+//       chaque barre par `tickPositionDraw`.
+// @field dir    +1 long / -1 short (couleur du rayon).
+// @field bxPos  Box verte entrée→TP3 (zone de profit globale).
+// @field bxSL   Box rouge entrée→SL (grisée au BE / à la sortie).
+// @field lnT1   Ligne pointillée TP1 (`na` si non affichée).
+// @field lnT2   Ligne pointillée TP2 (`na` si non affichée).
+// @field lnRun  Rayon d'exposition restante, au niveau d'entrée.
+// @field lbRun  Étiquette de la taille restante, à l'extrémité du rayon.
+// @field runner true → TP3 atteint : box figée, le rayon a pris le relais.
+// @field greyed true → BE armé : box SL grisée (risque éteint, position vivante).
+export type PositionDraw
+    int   dir    = 0
+    box   bxPos  = na
+    box   bxSL   = na
+    line  lnT1   = na
+    line  lnT2   = na
+    line  lnRun  = na
+    label lbRun  = na
+    bool  runner = false
+    bool  greyed = false
+
+// ── Helpers internes (non exportés) ──────────────────────────
+mkBox(int lt, int barMs, float a, float b, color col) =>
+    box.new(left = lt, top = math.max(a, b), right = lt + barMs, bottom = math.min(a, b), xloc = xloc.bar_time, border_color = color.new(col, A_BD_LIVE), bgcolor = color.new(col, A_BG_LIVE), border_width = 1, extend = extend.none, force_overlay = true)
+
+mkLine(int lt, int barMs, float y, color col) =>
+    line.new(x1 = lt, y1 = y, x2 = lt + barMs, y2 = y, xloc = xloc.bar_time, color = color.new(col, A_LINE), width = 1, style = line.style_dashed, force_overlay = true)
+
+mkRay(int lt, int rt, float y, color col) =>
+    line.new(x1 = lt, y1 = y, x2 = rt, y2 = y, xloc = xloc.bar_time, color = color.new(col, A_RAY), width = 2, style = line.style_solid, force_overlay = true)
+
+// Estompe les boxes (position fermée OU gros du trade fini au TP3). SL reste GRIS si BE atteint.
+fadeBoxes(PositionDraw pd) =>
+    box.set_bgcolor(pd.bxPos, color.new(COL_PROFIT, A_BG_DONE))
+    box.set_border_color(pd.bxPos, color.new(COL_PROFIT, A_BD_DONE))
+    slCol = pd.greyed ? COL_GREY : COL_STOP
+    box.set_bgcolor(pd.bxSL, color.new(slCol, A_BG_DONE))
+    box.set_border_color(pd.bxSL, color.new(slCol, A_BD_DONE))
+    if not na(pd.lnT1)
+        line.set_color(pd.lnT1, color.new(COL_PROFIT, A_BD_DONE))
+    if not na(pd.lnT2)
+        line.set_color(pd.lnT2, color.new(COL_PROFIT, A_BD_DONE))
+
+// Supprime le rayon + son étiquette : aucune trace d'exposition sur une position fermée.
+delRay(PositionDraw pd) =>
+    if not na(pd.lnRun)
+        line.delete(pd.lnRun)
+    if not na(pd.lbRun)
+        label.delete(pd.lbRun)
+
+// ============================================================
+// API
+// ============================================================
+
+// @function Crée le dessin complet d'une position, ancré à la bougie d'entrée (`leftTime`). Le rayon
+//           d'exposition + son étiquette sont portés `leadBars` barres devant l'entrée (étiquette vide :
+//           le caller la remplira via `tickPositionDraw` une fois la taille connue).
+// @param leftTime Time (ms) de la bougie d'entrée — ancre gauche.
+// @param barMs    Durée d'une barre en ms (`timeframe.in_seconds()*1000`).
+// @param leadBars Nombre de barres devant la barre courante où porter le rayon + étiquette.
+// @param dir      +1 long / -1 short.
+// @param entry/sl/tp1/tp2/tp3 Niveaux de la position.
+// @param showT1/showT2 Tracer (ou non) la ligne TP1 / TP2 (selon répartition).
+// @returns PositionDraw.
+export newPositionDraw(int leftTime, int barMs, int leadBars, int dir, float entry, float sl, float tp1, float tp2, float tp3, bool showT1, bool showT2) =>
+    col = dir == 1 ? COL_PROFIT : COL_STOP
+    rt  = leftTime + leadBars * barMs
+    PositionDraw.new(
+         dir    = dir,
+         bxPos  = mkBox(leftTime, barMs, entry, tp3, COL_PROFIT),
+         bxSL   = mkBox(leftTime, barMs, entry, sl,  COL_STOP),
+         lnT1   = showT1 ? mkLine(leftTime, barMs, tp1, COL_PROFIT) : na,
+         lnT2   = showT2 ? mkLine(leftTime, barMs, tp2, COL_PROFIT) : na,
+         lnRun  = mkRay(leftTime, rt, entry, col),
+         lbRun  = label.new(x = rt, y = entry, xloc = xloc.bar_time, text = "", style = label.style_label_left, color = color.new(col, A_LBL), textcolor = color.white, size = size.small, force_overlay = true),
+         runner = false,
+         greyed = false)
+
+// @function Met à jour le dessin sur la bougie courante : étend les bords droits, porte le rayon +
+//           étiquette `leadBars` barres devant, et applique les transitions d'état selon les ÉVÉNEMENTS
+//           passés par le caller. APPELER À CHAQUE BARRE tant que la position vit.
+//   Règles (identiques pour toute strat) :
+//   - rayon + étiquette : portés devant et étendus tant que non clôturé ; texte = `sizeText` (si non vide).
+//   - boxes + lignes TP : étendues tant que le runner n'a pas pris le relais (figées au TP3).
+//   - `tp3Hit` (1ʳᵉ fois) → runner : box figée+estompée, le rayon continue de courir.
+//   - `beArm` (1ʳᵉ fois) → box SL grisée (risque éteint, position vivante).
+//   - `closed` → boxes estompées (si pas déjà) + rayon/étiquette SUPPRIMÉS (aucune trace).
+// @param pd       PositionDraw à mettre à jour.
+// @param nowTime  Time (ms) de la barre courante.
+// @param barMs    Durée d'une barre en ms.
+// @param leadBars Barres d'avance du rayon/étiquette.
+// @param sizeText Texte d'exposition restante (vide = ne pas changer le texte).
+// @param tp3Hit   TP3 atteint cette barre (naissance du runner).
+// @param beArm    BE armé cette barre.
+// @param closed   Position clôturée cette barre.
+// @returns le PositionDraw (mutations in-place).
+export tickPositionDraw(PositionDraw pd, int nowTime, int barMs, int leadBars, string sizeText, bool tp3Hit, bool beArm, bool closed) =>
+    rx    = nowTime + barMs
+    rxRun = nowTime + leadBars * barMs
+    // Boxes + lignes TP : étendues tant que le runner n'a pas pris le relais (y compris la barre de
+    //   sortie → elles figent ICI ; le test `not pd.runner` précède la transition runner ci-dessous).
+    if not pd.runner
+        box.set_right(pd.bxPos, rx)
+        box.set_right(pd.bxSL, rx)
+        if not na(pd.lnT1)
+            line.set_x2(pd.lnT1, rx)
+        if not na(pd.lnT2)
+            line.set_x2(pd.lnT2, rx)
+    // Rayon d'exposition : porté devant tant que non clôturé (supprimé à la sortie).
+    if not closed
+        if not na(pd.lnRun)
+            line.set_x2(pd.lnRun, rxRun)
+        if not na(pd.lbRun)
+            label.set_x(pd.lbRun, rxRun)
+            if sizeText != ""
+                label.set_text(pd.lbRun, sizeText)
+    if closed
+        if not pd.runner
+            fadeBoxes(pd)                                 // boxes pas encore estompées (sortie avant le TP3)
+        delRay(pd)                                        // aucune trace d'exposition sur une position fermée
+    else
+        if tp3Hit and not pd.runner
+            pd.runner := true                            // gros du trade fini → box figée ; le rayon continue
+            fadeBoxes(pd)
+        if beArm and not pd.greyed
+            pd.greyed := true                            // BE armé → box SL grisée (risque éteint, vivante)
+            box.set_bgcolor(pd.bxSL, color.new(COL_GREY, A_GREY_BG))
+            box.set_border_color(pd.bxSL, color.new(COL_GREY, A_GREY_BD))
+    pd

@@ -1,0 +1,177 @@
+//@version=6
+// @description lib-strat-range — setups d'une stratégie de RANGE (cassure / réintégration) sur un range
+//   QUELCONQUE (Open Range, Asian range, London range, ...). Couche 1 : logique pure, ne lit aucun
+//   `input.*`, ne dessine rien, aucun littéral `color.*`. Le caller fournit le range (high/low + figé) ;
+//   la lib tient la machine d'état d'excursion et renvoie le setup (sens, entrée, SL, TP1/2/3).
+//   La SOURCE du range est au caller : `lib_levels.openRange(tz)` (OR), `lib_levels.sessionHL(...)` (Asian), etc.
+library("lib_strat_range", overlay = true)
+
+// ============================================================
+// Stop "swing" (plus haut / plus bas)
+// ============================================================
+
+// @function Stop "swing" : plus bas (long) / plus haut (short) sur `length` bougies (courante incluse),
+//           décalé d'un buffer = `tolPct` % du RANGE de la bougie qui a marqué l'extrême.
+//           Toutes les fonctions `ta.*` tournent à CHAQUE barre — n'appeler que hors bloc conditionnel.
+// @param length Nombre de bougies (courante incluse), ≥ 2.
+// @param tolPct Buffer en % du range (high-low) de la bougie de l'extrême.
+// @param dir    +1 → stop SOUS le plus-bas (long) ; sinon → stop AU-DESSUS du plus-haut (short).
+// @returns Niveau de stop (series float).
+export swingStop(simple int length, simple float tolPct, simple int dir) =>
+    dl = math.abs(ta.lowestbars(low,  length))
+    dh = math.abs(ta.highestbars(high, length))
+    ll = ta.lowest(low,  length)
+    hh = ta.highest(high, length)
+    dir > 0 ? ll - (high[dl] - low[dl]) * tolPct / 100.0 : hh + (high[dh] - low[dh]) * tolPct / 100.0
+
+// ============================================================
+// Setup de range
+// ============================================================
+
+// @type Setup détecté sur la bougie de signal (valeurs figées). `triggered=false` → aucun setup cette barre.
+// @field triggered Un setup s'est armé sur cette bougie fermée.
+// @field dir       +1 long / -1 short.
+// @field entry     Extrême de la bougie de signal (haut si long, bas si short) — niveau de référence d'entrée.
+// @field sl        Stop-loss figé (selon le mode : % range, % mèche, ou swing).
+// @field tp1       Cible 1.
+// @field tp2       Cible 2.
+// @field tp3       Cible 3.
+export type RangeSetup
+    bool  triggered = false
+    int   dir       = 0
+    float entry     = na
+    float sl        = na
+    float tp1       = na
+    float tp2       = na
+    float tp3       = na
+
+// @function Détecte un setup de range (cassure / réintégration) sur la bougie fermée courante et renvoie
+//           ses niveaux figés. Tient en interne la machine d'état d'excursion (extrême Dow fadé par une
+//           réintégration), réinitialisée à `dayReset`. APPELER À CHAQUE BARRE, hors bloc conditionnel
+//           (état `var` + `ta.*` → cohérence historique/live).
+//
+//   Deux setups :
+//   - CASSURE       : 1re clôture HORS du range → continuation (long si au-dessus, short si en-dessous).
+//   - RÉINTÉGRATION : après une cassure confirmée, une clôture qui REVIENT dans le range → fade.
+//
+//   SL par setup, deux modes chacun :
+//   - cassure : `breakUseSwing=false` → `borne ∓ slBreakPct% · R` ; `true` → swing (slBreakLook/slBreakTol).
+//   - réintég : `reintUseSwing=false` → extrême ± `slReintPct%` de la mèche ; `true` → swing (slReintLook/slReintTol).
+//   TP = multiples du range `R = rangeHigh − rangeLow` (réintég : depuis la borne opposée).
+//
+// @param rangeHigh/rangeLow Bornes du range (d'où qu'il vienne).
+// @param rangeReady         Range figé/exploitable (sinon aucune détection).
+// @param dayReset           Reset de session (nouveau jour) → purge l'état d'excursion.
+// @param enableBreak/enableReint  Active chaque famille de setup.
+// @param breakUseSwing/reintUseSwing  Mode SL par setup (true = swing).
+// @param slBreakPct  SL cassure en % du range depuis la borne cassée (mode non-swing).
+// @param slReintPct  SL réintég en % de la mèche de l'extrême (mode non-swing).
+// @param slBreakLook/slBreakTol  Lookback + tolérance du swing cassure.
+// @param slReintLook/slReintTol  Lookback + tolérance du swing réintég.
+// @param tpB1/tpB2/tpB3  Multiples (× R) des TP cassure.
+// @param tpR1/tpR2/tpR3  Multiples (× R) des TP réintég (depuis la borne opposée).
+// @returns RangeSetup figé pour cette bougie (`triggered=false` si rien).
+export detectRangeSetup(
+     series float rangeHigh, series float rangeLow, series bool rangeReady, series bool dayReset,
+     simple bool enableBreak, simple bool enableReint,
+     simple bool breakUseSwing, simple float slBreakPct, simple int slBreakLook, simple float slBreakTol,
+     simple bool reintUseSwing, simple float slReintPct, simple int slReintLook, simple float slReintTol,
+     simple float tpB1, simple float tpB2, simple float tpB3,
+     simple float tpR1, simple float tpR2, simple float tpR3) =>
+    // Stops swing — calculés CHAQUE barre (hors conditionnel).
+    float slBreakSwingL = swingStop(slBreakLook, slBreakTol, 1)
+    float slBreakSwingS = swingStop(slBreakLook, slBreakTol, -1)
+    float slReintSwingL = swingStop(slReintLook, slReintTol, 1)
+    float slReintSwingS = swingStop(slReintLook, slReintTol, -1)
+    // État d'excursion (persistant, reset à dayReset).
+    var bool  outAbove   = false
+    var bool  outBelow   = false
+    var float exHigh     = na
+    var float exHighWick = na
+    var float exLow      = na
+    var float exLowWick  = na
+    var bool  brokeUp    = false
+    var bool  brokeDn    = false
+    var bool  cassuredUp = false
+    var bool  cassuredDn = false
+    RangeSetup s = RangeSetup.new()
+    if barstate.isconfirmed
+        if dayReset
+            outAbove   := false
+            outBelow   := false
+            exHigh     := na
+            exHighWick := na
+            exLow      := na
+            exLowWick  := na
+            brokeUp    := false
+            brokeDn    := false
+            cassuredUp := false
+            cassuredDn := false
+        if rangeReady
+            R = rangeHigh - rangeLow
+            // Suivi de l'excursion (extrême Dow fadé par une réintégration).
+            if high > rangeHigh
+                if not outAbove
+                    outAbove   := true
+                    exHigh     := high
+                    exHighWick := high - math.max(open, close)
+                else if high > exHigh
+                    exHigh     := high
+                    exHighWick := high - math.max(open, close)
+            if low < rangeLow
+                if not outBelow
+                    outBelow  := true
+                    exLow     := low
+                    exLowWick := math.min(open, close) - low
+                else if low < exLow
+                    exLow     := low
+                    exLowWick := math.min(open, close) - low
+            // Cassure = 1re clôture au-delà de la borne (pas à chaque barre dehors).
+            firstCloseAbove = close > rangeHigh and not brokeUp
+            firstCloseBelow = close < rangeLow and not brokeDn
+            brokeUp := close > rangeHigh
+            brokeDn := close < rangeLow
+            // Toute clôture au-delà arme la réintégration (qui attend un retour dedans).
+            if close > rangeHigh
+                cassuredUp := true
+            if close < rangeLow
+                cassuredDn := true
+            closeInside = close <= rangeHigh and close >= rangeLow
+            slBreakDist = (slBreakPct / 100.0) * R
+            if enableBreak and firstCloseAbove
+                s.triggered := true
+                s.dir := 1
+                s.sl  := breakUseSwing ? slBreakSwingL : rangeHigh - slBreakDist
+                s.tp1 := rangeHigh + tpB1 * R
+                s.tp2 := rangeHigh + tpB2 * R
+                s.tp3 := rangeHigh + tpB3 * R
+            else if enableBreak and firstCloseBelow
+                s.triggered := true
+                s.dir := -1
+                s.sl  := breakUseSwing ? slBreakSwingS : rangeLow + slBreakDist
+                s.tp1 := rangeLow - tpB1 * R
+                s.tp2 := rangeLow - tpB2 * R
+                s.tp3 := rangeLow - tpB3 * R
+            else if enableReint and closeInside and cassuredUp
+                s.triggered := true                              // cassure haute confirmée puis retour dedans → short
+                s.dir := -1
+                upW = high - math.max(open, close)               // mèche HAUTE de la bougie de réintégration
+                s.sl  := reintUseSwing ? slReintSwingS : high + (slReintPct / 100.0) * (upW > 0 ? upW : math.abs(open - close))
+                s.tp1 := rangeHigh - tpR1 * R
+                s.tp2 := rangeHigh - tpR2 * R                    // tpR=1.0 → borne opposée (rangeLow)
+                s.tp3 := rangeHigh - tpR3 * R
+                cassuredUp := false                              // ré-armé : il faut une NOUVELLE cassure
+                outAbove   := false
+            else if enableReint and closeInside and cassuredDn
+                s.triggered := true                              // cassure basse confirmée puis retour dedans → long
+                s.dir := 1
+                dnW = math.min(open, close) - low                // mèche BASSE de la bougie de réintégration
+                s.sl  := reintUseSwing ? slReintSwingL : low - (slReintPct / 100.0) * (dnW > 0 ? dnW : math.abs(open - close))
+                s.tp1 := rangeLow + tpR1 * R
+                s.tp2 := rangeLow + tpR2 * R                     // tpR=1.0 → borne opposée (rangeHigh)
+                s.tp3 := rangeLow + tpR3 * R
+                cassuredDn := false
+                outBelow   := false
+            if s.triggered
+                s.entry := s.dir == 1 ? high : low               // extrême de la bougie de signal
+    s

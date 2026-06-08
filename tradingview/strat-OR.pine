@@ -27,7 +27,9 @@ strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
   // rejet broker tant que le levier choisi reste ≤ 100×. Le sizing par RISQUE pilote la qty, le levier en est le plafond.
   max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
 
-import mpilard/lib_levels/12 as levels
+import mpilard/lib_levels/12      as levels
+import mpilard/lib_strat_range/1  as stratRange   // setups de range (détection pure) — publier en v1
+import mpilard/lib_strat_draw/1   as stratDraw    // rendu position générique — publier en v1
 
 // ============================================================
 // Inputs
@@ -86,17 +88,13 @@ beMode     = input.string(BE_TP1, "Break-even", options = [BE_NONE, BE_TP1, BE_E
 earlyBEPct = input.float(1.0, "BE anticipée — % prix dans notre sens", group = GRP_POS, minval = 0.1, step = 0.1, tooltip = "Utilisé uniquement en mode « Anticipée ». % du prix d'entrée parcouru en notre faveur déclenchant le BE.")
 
 var string GRP_DBG = "Debug"
-debug     = input.bool(false, "Afficher les bulles de signal", group = GRP_DBG, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
+debug     = input.bool(false, "Afficher bulles + flèches de signal", group = GRP_DBG, tooltip = "Affiche les ronds (bulles) sur les cassures/réintégrations détectées ET les flèches d'entrée (cassure de la bulle). N'altère pas la détection ni les entrées.")
 
 // ============================================================
-// Constantes & couleurs
+// Constantes
 // ============================================================
-COL_SL   = color.red
-COL_TP   = color.green
-COL_GREY = color.gray
-TR_DONE_BG = 92   // trade FERMÉ : fond estompé (plus transparent qu'une position vivante)
-TR_DONE_BD = 70   // trade FERMÉ : bordure / ligne estompée
-RUN_LEAD   = 5    // rayon « taille restante » : étendu (et étiquette posée) à N barres DEVANT la barre courante
+// (Couleurs & transparences du rendu de position → lib_strat_draw.)
+RUN_LEAD = 5      // rayon « exposition restante » : porté N barres DEVANT la barre courante (passé à lib_strat_draw)
 
 // Répartition effective (le reliquat va au runner, ou à TP3 si runner off)
 splitBase  = qtyTP1 + qtyTP2 + qtyTP3
@@ -117,14 +115,9 @@ type Trade
     float tp2
     float tp3
     bool  closed       // figée : SL/BE ou TP3 touché
-    bool  slGreyed     // BE armé : stop ramené à l'entrée + box SL grisée
+    bool  slGreyed     // BE armé : stop ramené à l'entrée (état MOTEUR ; le grisage visuel est dans pd)
     bool  runner       // reliquat runner seul (TP3 atteint) → ne compte plus comme position en cours
-    box   bxPos        // box verte entrée→TP3
-    box   bxSL         // box rouge entrée→SL
-    line  lnT1         // ligne pointillée TP1
-    line  lnT2         // ligne pointillée TP2
-    line  lnRun        // rayon « taille restante » au niveau d'entrée, tracé dès l'entrée
-    label lbRun        // étiquette de la taille restante (live, signée), à l'extrémité du rayon
+    stratDraw.PositionDraw pd   // tous les objets graphiques de la position (lib_strat_draw)
 
 // Entrée PLACÉE mais pas encore DESSINÉE : on attend la confirmation du fill (liveSize ≠ 0) pour ne
 //   dessiner que les trades réellement exécutés (un ordre capé à 0 par le capital ne laisse aucune trace).
@@ -142,18 +135,8 @@ type Pending
 // ============================================================
 // État persistant (reset au changement de jour chart)
 // ============================================================
-var int   tradesToday  = 0
-var bool  outAbove     = false
-var bool  outBelow     = false
-var float exHigh       = na
-var float exHighWick   = na
-var float exLow        = na
-var float exLowWick    = na
-var bool  brokeUpState = false   // dernière clôture évaluée au-dessus de orH ?
-var bool  brokeDnState = false   // dernière clôture évaluée sous orL ?
-var bool  cassuredUp   = false   // une bougie a CLÔTURÉ au-dessus de orH (cassure confirmée, pas une mèche) ?
-var bool  cassuredDn   = false   // une bougie a CLÔTURÉ sous orL ?
-var int   tradeSeq     = 0
+var int   tradesToday  = 0       // compteur de trades du jour (plafond `tradesMax`) — reset au changement de jour
+// (État d'excursion + détection cassure/réintégration → lib_strat_range, machine d'état interne.)
 var array<Trade> trades = array.new<Trade>()
 var array<Pending> pending = array.new<Pending>()   // entrées placées en attente de confirmation de fill
 
@@ -176,38 +159,12 @@ dayChange = ta.change(dayofmonth(time, orTz)) != 0
 R       = orH - orL
 orReady = orSeen and not na(orEnd) and not na(R) and R > 0 and time >= orEnd
 
-// SL « plus haut/plus bas » (mode alternatif par setup) — séries calculées CHAQUE barre (ta.* hors
-//   conditionnel). SL = plus bas (long) / plus haut (short) sur N bougies (courante incluse), ± un buffer
-//   = tolérance % du RANGE de la bougie qui a marqué l'extrême. Lookback/tolérance propres à chaque setup.
-brHLdL = math.abs(ta.lowestbars(low,   slBreakLook))
-brHLdS = math.abs(ta.highestbars(high, slBreakLook))
-slBreakHL_L = ta.lowest(low,   slBreakLook) - (high[brHLdL] - low[brHLdL]) * slBreakTol / 100.0
-slBreakHL_S = ta.highest(high, slBreakLook) + (high[brHLdS] - low[brHLdS]) * slBreakTol / 100.0
-reHLdL = math.abs(ta.lowestbars(low,   slReintLook))
-reHLdS = math.abs(ta.highestbars(high, slReintLook))
-slReintHL_L = ta.lowest(low,   slReintLook) - (high[reHLdL] - low[reHLdL]) * slReintTol / 100.0
-slReintHL_S = ta.highest(high, slReintLook) + (high[reHLdS] - low[reHLdS]) * slReintTol / 100.0
-
-// Helpers de rendu (box bornée + ligne horizontale, ancrées en bar_time, étendues manuellement)
-mkBox(int lt, float a, float b, color col) => box.new(left = lt, top = math.max(a, b), right = lt + oneBarMs, bottom = math.min(a, b), xloc = xloc.bar_time, border_color = color.new(col, 40), bgcolor = color.new(col, 85), border_width = 1, extend = extend.none, force_overlay = true)
-mkLine(int lt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = lt + oneBarMs, y2 = y, xloc = xloc.bar_time, color = color.new(col, 20), width = 1, style = line.style_dashed, force_overlay = true)
-mkRay(int lt, int rt, float y, color col) => line.new(x1 = lt, y1 = y, x2 = rt, y2 = y, xloc = xloc.bar_time, color = color.new(col, 10), width = 2, style = line.style_solid, force_overlay = true)
-
-// Ouvre une position DESSINÉE et la tracke dans `trades` : box verte entrée→TP3, box rouge entrée→SL,
-//   lignes pointillées TP1/TP2 (selon répartition). Ancrée à la bougie courante (la flèche) ;
-//   étendue puis figée barre par barre par la boucle de vie des positions (bas du fichier).
+// Ouvre une position DESSINÉE (via lib_strat_draw) et la tracke dans `trades`. Ancrée à la bougie
+//   d'entrée `lt` (la flèche). Le rendu (box profit/SL, lignes TP, rayon d'expo + label) + son cycle
+//   de vie sont entièrement délégués à lib_strat_draw ; ici on ne tient que l'état MOTEUR du trade.
 openPos(string id, int dir, float entry, float sl, float tp1, float tp2, float tp3, int lt) =>
-    bxP = mkBox(lt, entry, tp3, COL_TP)
-    bxS = mkBox(lt, entry, sl,  COL_SL)
-    l1  = qtyTP1 > 0 ? mkLine(lt, tp1, COL_TP) : na
-    l2  = qtyTP2 > 0 ? mkLine(lt, tp2, COL_TP) : na
-    // Rayon « taille restante » au niveau d'entrée (vert long / rouge short), porté RUN_LEAD barres devant.
-    //   Dessiné seulement une fois le fill confirmé → la taille (live) est affichée dès la 1re barre du rayon.
-    col = dir == 1 ? COL_TP : COL_SL
-    rt  = lt + RUN_LEAD * oneBarMs
-    lr  = mkRay(lt, rt, entry, col)
-    lb  = label.new(x = rt, y = entry, xloc = xloc.bar_time, text = "", style = label.style_label_left, color = color.new(col, 20), textcolor = color.white, size = size.small, force_overlay = true)
-    array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, runner = false, bxPos = bxP, bxSL = bxS, lnT1 = l1, lnT2 = l2, lnRun = lr, lbRun = lb))
+    pd = stratDraw.newPositionDraw(lt, oneBarMs, RUN_LEAD, dir, entry, sl, tp1, tp2, tp3, qtyTP1 > 0, qtyTP2 > 0)
+    array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, runner = false, pd = pd))
 
 // Taille par RISQUE : qty telle que la perte au SL (distance entrée↔SL × valeur du point) = riskPct% de l'equity,
 //   CAPÉE par le levier (notionnel = qty×prix ≤ maxLev × equity). Retourne 0 si la distance est nulle (setup
@@ -217,20 +174,6 @@ riskQty(float entry, float sl) =>
     rb  = d > 0 ? (strategy.equity * riskPct / 100.0) / (d * syminfo.pointvalue) : 0.0
     cap = entry > 0 ? (strategy.equity * maxLev) / (entry * syminfo.pointvalue) : rb   // plafond de levier
     math.min(rb, cap)
-
-// Estompe une position FERMÉE (transparence accrue) pour la faire reculer visuellement.
-//   SL : reste GRIS si le trade a atteint BE (slGreyed) — sortie à BE = non-événement discret ;
-//   sinon ROUGE. Le gris VIF (opaque, 85/45) reste réservé à une position vivante à BE ; ici gris ESTOMPÉ.
-fadePos(Trade t) =>
-    box.set_bgcolor(t.bxPos, color.new(COL_TP, TR_DONE_BG))
-    box.set_border_color(t.bxPos, color.new(COL_TP, TR_DONE_BD))
-    slCol = t.slGreyed ? COL_GREY : COL_SL
-    box.set_bgcolor(t.bxSL, color.new(slCol, TR_DONE_BG))
-    box.set_border_color(t.bxSL, color.new(slCol, TR_DONE_BD))
-    if not na(t.lnT1)
-        line.set_color(t.lnT1, color.new(COL_TP, TR_DONE_BD))
-    if not na(t.lnT2)
-        line.set_color(t.lnT2, color.new(COL_TP, TR_DONE_BD))
 
 // Taille réellement encore ouverte pour un ordre d'entrée (somme des positions moteur portant cet id).
 //   Signée : négative pour un short. Alimente le label « taille restante » du rayon (décroît aux TP filés).
@@ -242,137 +185,38 @@ liveSize(string id) =>
                 s += strategy.opentrades.size(i)
     s
 
-// Supprime le rayon + son étiquette à la sortie : aucune trace de « taille restante » sur une position fermée.
-delRunner(Trade t) =>
-    if not na(t.lnRun)
-        line.delete(t.lnRun)
-    if not na(t.lbRun)
-        label.delete(t.lbRun)
+// (rendu du cycle de vie — extension / freeze TP3 / fade / BE / suppression du rayon → lib_strat_draw.tickPositionDraw)
 
-// (helper filledNow retiré — plus de moteur d'ordres à ce stade)
+// --- Détection des setups de range — déléguée à lib_strat_range ---
+//   Appelée À CHAQUE BARRE, hors conditionnel : la lib tient la machine d'état d'excursion en interne et
+//   ne déclenche que sur bougie fermée. `dayChange` purge son état ; `orReady` = OR figé. Le Mode SL « plus
+//   haut/plus bas » est passé en booléen ; les lookback/tolérance/multiples sont passés tels quels.
+sig = stratRange.detectRangeSetup(
+     orH, orL, orReady, dayChange,
+     enableBreak, enableReint,
+     slBreakMode == SL_HL, slBreakPct, slBreakLook, slBreakTol,
+     slReintMode == SL_HL, slReintWick, slReintLook, slReintTol,
+     tpBreak1, tpBreak2, tpBreak3,
+     tpReint1, tpReint2, tpReint3)
 
-// Marqueurs de signal (série réinitialisée chaque barre) : niveau d'entrée potentiel par sens.
-float dbgTrigUp = na   // bulle LONG : extrême (haut) de la bougie de signal
-float dbgTrigDn = na   // bulle SHORT : extrême (bas) de la bougie de signal
-float dbgFill   = na   // (inutilisé pour l'instant)
+// Niveaux figés du setup (na hors déclenchement), lus en [1] à la flèche (bougie suivante).
+//   Bulles de debug : extrême de la bougie de signal, par sens.
+dbgTrigUp = sig.triggered and sig.dir ==  1 ? sig.entry : na
+dbgTrigDn = sig.triggered and sig.dir == -1 ? sig.entry : na
+sigSL  = sig.triggered ? sig.sl  : na
+sigTP1 = sig.triggered ? sig.tp1 : na
+sigTP2 = sig.triggered ? sig.tp2 : na
+sigTP3 = sig.triggered ? sig.tp3 : na
 
-// SL/TP du signal de la bougie courante — mémorisés pour les redessiner à la flèche (bougie suivante).
-float sigSL  = na   // SL figé du setup sur sa bougie de signal (lu en [1] à la flèche), selon le Mode SL.
-float sigTP1 = na
-float sigTP2 = na
-float sigTP3 = na
-
-// ============================================================
-// Logique — uniquement sur bougie fermée (pas de repaint)
-// ============================================================
+// Compteur debug + reset du compteur de trades du jour (l'état d'excursion, lui, est reset DANS la lib).
 if barstate.isconfirmed
-    // --- Nouveau jour : reset de l'état de DÉTECTION + du compteur de trades du jour.
+    if sig.triggered
+        cntTriggers += 1
     if dayChange
-        outAbove     := false
-        outBelow     := false
-        exHigh       := na
-        exHighWick   := na
-        exLow        := na
-        exLowWick    := na
-        brokeUpState := false
-        brokeDnState := false
-        cassuredUp   := false
-        cassuredDn   := false
-        tradesToday  := 0
+        tradesToday := 0
 
-    // (Vie des positions dessinées — extension + fermeture SL/TP3 — gérée en bas, pilotée par les flèches.
-    //  Pas de moteur d'ordres ici : ce sera l'étape suivante.)
-
-    // --- 2. Détection des déclencheurs (OR figé) ---
-    if orReady
-        // Suivi de l'excursion (extrême Dow fadé par une réintégration)
-        if high > orH
-            if not outAbove
-                outAbove   := true
-                exHigh     := high
-                exHighWick := high - math.max(open, close)
-            else if high > exHigh
-                exHigh     := high
-                exHighWick := high - math.max(open, close)
-        if low < orL
-            if not outBelow
-                outBelow  := true
-                exLow     := low
-                exLowWick := math.min(open, close) - low
-            else if low < exLow
-                exLow     := low
-                exLowWick := math.min(open, close) - low
-
-        // La CASSURE se déclenche sur la 1re clôture au-delà de la borne (pas à chaque barre dehors).
-        firstCloseAbove = close > orH and not brokeUpState
-        firstCloseBelow = close < orL and not brokeDnState
-        brokeUpState := close > orH
-        brokeDnState := close < orL
-        // Cassure CONFIRMÉE = une clôture au-delà. Elle arme la réintégration (qui attend un retour dedans).
-        if close > orH
-            cassuredUp := true
-        if close < orL
-            cassuredDn := true
-        closeInside  = close <= orH and close >= orL
-        slBreakDist  = (slBreakPct / 100.0) * R
-
-        // Un déclencheur fige : sens, SL, TPs (ancrés sur l'OR). L'entrée se fait au marché à la
-        // clôture de la bougie déclencheuse (proche de la borne OR → cibles toujours du bon côté).
-        bool  triggered = false
-        int   tDir      = 0
-        float tEntry    = na      // niveau du stop = extrême de la bougie de signal (fixé en section 3)
-        float tSL       = na
-        float tTP1      = na
-        float tTP2      = na
-        float tTP3      = na
-        if enableBreak and firstCloseAbove
-            triggered := true
-            tDir   := 1
-            tSL    := slBreakMode == SL_HL ? slBreakHL_L : orH - slBreakDist   // plus-bas N bougies OU % range
-            tTP1   := orH + tpBreak1 * R
-            tTP2   := orH + tpBreak2 * R
-            tTP3   := orH + tpBreak3 * R
-        else if enableBreak and firstCloseBelow
-            triggered := true
-            tDir   := -1
-            tSL    := slBreakMode == SL_HL ? slBreakHL_S : orL + slBreakDist   // plus-haut N bougies OU % range
-            tTP1   := orL - tpBreak1 * R
-            tTP2   := orL - tpBreak2 * R
-            tTP3   := orL - tpBreak3 * R
-        else if enableReint and closeInside and cassuredUp
-            triggered := true                                // cassure confirmée en haut puis retour dedans → short
-            tDir   := -1
-            upW = high - math.max(open, close)               // mèche HAUTE de la bougie de réintégration (la bulle)
-            tSL := slReintMode == SL_HL ? slReintHL_S : high + (slReintWick / 100.0) * (upW > 0 ? upW : math.abs(open - close))   // plus-haut N bougies OU % mèche
-            tTP1   := orH - tpReint1 * R
-            tTP2   := orH - tpReint2 * R                     // 1.0 = orL (borne opposée), comme l'ancien figé
-            tTP3   := orH - tpReint3 * R
-            cassuredUp := false                              // ré-armé : il faudra une NOUVELLE cassure
-            outAbove   := false
-        else if enableReint and closeInside and cassuredDn
-            triggered := true                                // cassure confirmée en bas puis retour dedans → long
-            tDir   := 1
-            dnW = math.min(open, close) - low                // mèche BASSE de la bougie de réintégration (la bulle)
-            tSL := slReintMode == SL_HL ? slReintHL_L : low - (slReintWick / 100.0) * (dnW > 0 ? dnW : math.abs(open - close))    // plus-bas N bougies OU % mèche
-            tTP1   := orL + tpReint1 * R
-            tTP2   := orL + tpReint2 * R                     // 1.0 = orH (borne opposée), comme l'ancien figé
-            tTP3   := orL + tpReint3 * R
-            cassuredDn := false
-            outBelow   := false
-
-        // --- 3. BULLES : on marque le niveau d'entrée potentiel (extrême de la bougie de signal).
-        //        L'ENTRÉE/LES ORDRES sont retirés — à reconstruire step by step.
-        if triggered
-            cntTriggers += 1
-            tEntry := tDir == 1 ? high : low                 // extrême de la bougie de signal (haut si long, bas si short)
-            sigSL  := tSL                                    // SL figé du setup (% range / % mèche / plus haut-bas selon le mode)
-            sigTP1 := tTP1
-            sigTP2 := tTP2
-            sigTP3 := tTP3
-            if tDir == 1
-                dbgTrigUp := tEntry
-            else
-                dbgTrigDn := tEntry
+// (Détection des setups + bulles : déléguées à lib_strat_range, plus haut. L'orchestration de l'entrée
+//  et la vie des positions sont gérées dans le bloc « Visualisation » ci-dessous.)
 
 // ============================================================
 // Visualisation de l'Open Range + debug
@@ -389,8 +233,8 @@ plot(debug ? dbgTrigDn : na, "Signal short", color = color.new(color.red,  0), s
 //   - bulle rouge (short) cassée par le BAS   : low de cette bougie  < low de la bulle   → flèche down
 breakUp = not na(dbgTrigUp[1]) and (breakOnClose ? close > dbgTrigUp[1] : high > dbgTrigUp[1])
 breakDn = not na(dbgTrigDn[1]) and (breakOnClose ? close < dbgTrigDn[1] : low  < dbgTrigDn[1])
-plotshape(breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
-plotshape(breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
+plotshape(debug and breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
+plotshape(debug and breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
 
 // VIE DE LA POSITION dessinée — uniquement sur bougie fermée (pas de doublon en temps réel).
 //   À chaque flèche on ouvre une position : entrée = close de la bougie-flèche si validation en
@@ -446,27 +290,9 @@ if barstate.isconfirmed
     //   % prix OU au TP1 → stop à l'entrée, box SL grisée — réservé à une position VIVANTE), et FIGER au stop
     //   courant (SL/BE) ou au TP3 → la position fermée est ESTOMPÉE (couleurs gardées, plus transparentes).
     if array.size(trades) > 0
-        rx = time + oneBarMs
         for t in trades
             if not t.closed
-                // Rayon « taille restante » (niveau d'entrée, depuis l'entrée) : porté RUN_LEAD barres devant
-                //   la barre courante ; le label suit la taille réellement ouverte (décroît à chaque TP filé).
-                rxRun = time + RUN_LEAD * oneBarMs
-                line.set_x2(t.lnRun, rxRun)
-                label.set_x(t.lbRun, rxRun)
-                ls = liveSize(t.id)
-                if ls != 0
-                    label.set_text(t.lbRun, str.tostring(ls, "#.###"))
-                // Boxes + lignes TP : étendues tant que le trade principal vit ; figées au TP3 (le rayon prend le relais).
-                if not t.runner
-                    box.set_right(t.bxPos, rx)
-                    box.set_right(t.bxSL, rx)
-                    if not na(t.lnT1)
-                        line.set_x2(t.lnT1, rx)
-                    if not na(t.lnT2)
-                        line.set_x2(t.lnT2, rx)
                 // Stop courant : SL d'origine, ou BE (= entrée) une fois la position sécurisée (slGreyed).
-                //   BE armé à la barre QUI SUIT le déclencheur (enregistré en fin de barre, après le test du stop).
                 stopNow = t.slGreyed ? t.entry : t.sl
                 // Sorties partielles moteur (stop COMMUN, suit le BE) : TP1/TP2/TP3 en limites + runner au stop/BE.
                 //   qty_percent = % de la position d'origine ; replacées chaque barre pour répercuter le stop courant.
@@ -480,27 +306,26 @@ if barstate.isconfirmed
                     strategy.exit("tr" + t.id, from_entry = t.id, qty_percent = runnerPct, stop = stopNow)
                 stopHit = t.dir == 1 ? low  <= stopNow : high >= stopNow
                 tp3Hit  = t.dir == 1 ? high >= t.tp3   : low  <= t.tp3
-                // Sortie : stop/BE (toute phase) ou TP3 sans runner. Le runner, lui, ne sort QUE par le stop.
+                // Transitions d'ÉTAT moteur — les ÉVÉNEMENTS (naissance runner, BE armé, clôture) sont passés au rendu.
+                bool runnerBirth = false
+                bool beArm       = false
                 if stopHit or (runnerPct == 0 and tp3Hit)
-                    t.closed := true
-                    if not t.runner
-                        fadePos(t)                               // boxes pas encore estompées (sortie avant le TP3)
-                    delRunner(t)                                 // supprime le rayon + label (rien sur une position fermée)
+                    t.closed := true                             // sortie : stop/BE (toute phase) ou TP3 sans runner
                 else
-                    // Naissance du runner (TP3 atteint, reliquat alloué) : on FIGE+estompe la box principale
-                    //   (le gros du trade est fini) ; le rayon « taille restante » continue de courir.
                     if runnerPct > 0 and tp3Hit and not t.runner
-                        t.runner := true
-                        fadePos(t)
-                    // BE : arme au premier déclencheur (anticipé = avant TP1) si pas encore sécurisée.
+                        t.runner := true                         // TP3 atteint → reliquat runner (ne compte plus comme position en cours)
+                        runnerBirth := true
                     if not t.slGreyed
                         beEarlyLvl = t.dir == 1 ? t.entry * (1 + earlyBEPct / 100.0) : t.entry * (1 - earlyBEPct / 100.0)
                         beEarly    = beMode == BE_EARLY and (t.dir == 1 ? high >= beEarlyLvl : low <= beEarlyLvl)
                         beAtTp1    = beMode == BE_TP1   and (t.dir == 1 ? high >= t.tp1 : low <= t.tp1)
                         if beEarly or beAtTp1
-                            t.slGreyed := true                   // BE armé → box SL grisée (risque éteint, position VIVANTE)
-                            box.set_bgcolor(t.bxSL, color.new(COL_GREY, 85))
-                            box.set_border_color(t.bxSL, color.new(COL_GREY, 45))
+                            t.slGreyed := true                   // BE armé (état moteur ; le grisage visuel est fait par le rendu)
+                            beArm := true
+                // Rendu (lib_strat_draw) : extension, taille live, freeze au TP3, grisage BE, suppression du rayon à la sortie.
+                ls = liveSize(t.id)
+                sizeText = ls != 0 ? str.tostring(ls, "#.###") : ""
+                stratDraw.tickPositionDraw(t.pd, time, oneBarMs, RUN_LEAD, sizeText, runnerBirth, beArm, t.closed)
         // Purge des positions figées (boxes déjà dessinées, gelées à leur dernier bord droit).
         for i = array.size(trades) - 1 to 0
             if array.get(trades, i).closed
