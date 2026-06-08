@@ -32,55 +32,61 @@ import mpilard/lib_levels/12 as levels
 // ============================================================
 // Inputs
 // ============================================================
-var string GRP_GEN = "Général"
-orTz      = input.string("Europe/Paris", "TZ Open Range",     group = GRP_GEN, tooltip = "TZ IANA définissant le 'minuit' de l'Open Range (Pine n'expose pas la TZ du chart).")
-tradesMax = input.int(3,                 "Trades max / jour",  group = GRP_GEN, minval = 1,    maxval = 10)
-maxOpen   = input.int(2,                 "Positions max en cours", group = GRP_GEN, minval = 1, maxval = 10, tooltip = "Positions ouvertes simultanément autorisées (renfort). Au-delà, le setup est ignoré.")
+var string GRP_OR = "Open Range"
+orTz      = input.string("Europe/Paris", "TZ Open Range", group = GRP_OR, tooltip = "TZ IANA définissant le 'minuit' de l'Open Range (Pine n'expose pas la TZ du chart).")
+
+var string GRP_EXEC = "Signaux & exécution"
 // Sens / hedge (const strings : options input.string + comparaisons)
 DIR_BOTH  = "Les deux sens (hedge)"
 DIR_LONG  = "Long seul"
 DIR_SHORT = "Short seul"
 DIR_NET   = "Sens unique (net, anti-hedge)"
-dirMode   = input.string(DIR_BOTH, "Sens / hedge", options = [DIR_BOTH, DIR_LONG, DIR_SHORT, DIR_NET], group = GRP_GEN, tooltip = "Les deux sens (hedge) : on DESSINE les deux ; ⚠ le moteur n'a qu'une position nette (il nette les sens opposés) → backtest fiable surtout en Long/Short/Net. Long/Short seul : un seul sens. Sens unique (net) : refuse un setup opposé à la position en cours.")
-riskPct   = input.float(1.0,             "Risque par trade (%)", group = GRP_GEN, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
-maxLev    = input.float(10.0,            "Levier (×)", group = GRP_GEN, minval = 1.0, maxval = 100.0, step = 1.0, tooltip = "Plafond de levier : cape la taille pour que le notionnel (qty×prix) ≤ levier × equity. Le sizing par risque réclame souvent un gros notionnel (SL serré) ; au-delà de ce levier la qty est capée (le risque réel devient < cible). 1× = compte cash sans levier.")
-debug     = input.bool(false,            "Debug (afficher les bulles de signal)", group = GRP_GEN, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
-breakOnClose = input.bool(false,         "Cassure de bougie validée en CLÔTURE (sinon mèche/séance)", group = GRP_GEN, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
+dirMode   = input.string(DIR_BOTH, "Sens / hedge", options = [DIR_BOTH, DIR_LONG, DIR_SHORT, DIR_NET], group = GRP_EXEC, tooltip = "Les deux sens (hedge) : on DESSINE les deux ; ⚠ le moteur n'a qu'une position nette (il nette les sens opposés) → backtest fiable surtout en Long/Short/Net. Long/Short seul : un seul sens. Sens unique (net) : refuse un setup opposé à la position en cours.")
+breakOnClose = input.bool(false, "Cassure validée en CLÔTURE (sinon mèche/séance)", group = GRP_EXEC, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
+tradesMax = input.int(3, "Trades max / jour", group = GRP_EXEC, minval = 1, maxval = 10)
+maxOpen   = input.int(2, "Positions max en cours", group = GRP_EXEC, minval = 1, maxval = 10, tooltip = "Positions ouvertes simultanément autorisées (renfort). Au-delà, le setup est ignoré.")
 
-var string GRP_BREAK = "Cassure"
-enableBreak = input.bool(true,  "Activer la cassure (continuation)", group = GRP_BREAK)
-tpBreak1    = input.float(1.0,  "TP1 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
-tpBreak2    = input.float(2.0,  "TP2 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
-tpBreak3    = input.float(5.0,  "TP3 (×range)", group = GRP_BREAK, minval = 0.1, step = 0.1)
+var string GRP_RISK = "Risque & levier"
+riskPct   = input.float(1.0, "Risque par trade (%)", group = GRP_RISK, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
+maxLev    = input.float(10.0, "Levier (×)", group = GRP_RISK, minval = 1.0, maxval = 100.0, step = 1.0, tooltip = "Plafond de levier : cape la taille pour que le notionnel (qty×prix) ≤ levier × equity. Le sizing par risque réclame souvent un gros notionnel (SL serré) ; au-delà de ce levier la qty est capée (le risque réel devient < cible). 1× = compte cash sans levier.")
+
+var string GRP_BREAK = "Setup — Cassure"
 SL_RANGE = "% range"
 SL_HL    = "Plus haut/plus bas"
+enableBreak = input.bool(true, "Activer la cassure (continuation)", group = GRP_BREAK)
+tpBreak1    = input.float(1.0, "TP1", inline = "brtp", group = GRP_BREAK, minval = 0.1, step = 0.1, tooltip = "TP1 / TP2 / TP3 en multiples du range OR.")
+tpBreak2    = input.float(2.0, "TP2", inline = "brtp", group = GRP_BREAK, minval = 0.1, step = 0.1)
+tpBreak3    = input.float(5.0, "TP3", inline = "brtp", group = GRP_BREAK, minval = 0.1, step = 0.1)
 slBreakMode = input.string(SL_RANGE, "Mode SL", options = [SL_RANGE, SL_HL], group = GRP_BREAK, tooltip = "« % range » : SL à X % du range depuis la borne cassée. « Plus haut/plus bas » : SL sur le plus bas (long) / plus haut (short) des N dernières bougies + tolérance.")
 slBreakPct  = input.float(55.0, "SL (% range)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "Mode « % range » : % du range depuis la borne cassée. Non capé : >100 autorisé.")
-slBreakLook = input.int(20,     "Lookback plus haut/bas (bougies)", group = GRP_BREAK, minval = 2, tooltip = "Mode « plus haut/plus bas » : nombre de bougies (courante incluse) pour le plus bas/haut.")
-slBreakTol  = input.float(25.0, "Tolérance SL (% range bougie)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "Mode « plus haut/plus bas » : buffer au-delà de l'extrême = ce % du range de la bougie qui a marqué l'extrême.")
+slBreakLook = input.int(20, "Plus haut/bas — Lookback", inline = "brhl", group = GRP_BREAK, minval = 2, tooltip = "Mode « plus haut/plus bas ». Lookback = nombre de bougies (courante incluse). Tol. % = buffer au-delà de l'extrême = % du range de la bougie qui a marqué l'extrême.")
+slBreakTol  = input.float(25.0, "Tol. %", inline = "brhl", group = GRP_BREAK, minval = 0, step = 1)
 
-var string GRP_REINT = "Réintégration"
-enableReint = input.bool(true,   "Activer la réintégration (fade)", group = GRP_REINT)
-tpReint1    = input.float(0.5,   "TP1 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1)
-tpReint2    = input.float(1.0,   "TP2 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1, tooltip = "1.0 = borne opposée du range (l'ancien défaut figé).")
-tpReint3    = input.float(2.0,   "TP3 (×range)", group = GRP_REINT, minval = 0.1, step = 0.1)
+var string GRP_REINT = "Setup — Réintégration"
 SL_WICK = "% mèche"
+enableReint = input.bool(true, "Activer la réintégration (fade)", group = GRP_REINT)
+tpReint1    = input.float(0.5, "TP1", inline = "retp", group = GRP_REINT, minval = 0.1, step = 0.1, tooltip = "TP1 / TP2 / TP3 en multiples du range OR. TP2 réintég : 1.0 = borne opposée du range (l'ancien défaut figé).")
+tpReint2    = input.float(1.0, "TP2", inline = "retp", group = GRP_REINT, minval = 0.1, step = 0.1)
+tpReint3    = input.float(2.0, "TP3", inline = "retp", group = GRP_REINT, minval = 0.1, step = 0.1)
 slReintMode = input.string(SL_WICK, "Mode SL", options = [SL_WICK, SL_HL], group = GRP_REINT, tooltip = "« % mèche » : SL au-delà de l'extrême de la bougie de réintégration (+ X % de sa mèche). « Plus haut/plus bas » : SL sur le plus bas/haut des N dernières bougies + tolérance.")
 slReintWick = input.float(100.0, "SL (% mèche)", group = GRP_REINT, minval = 0, step = 5, tooltip = "Mode « % mèche » : fraction de la mèche de l'extrême de la bougie de réintégration, ajoutée au-delà (body si open en extrême). Non capé.")
-slReintLook = input.int(20,      "Lookback plus haut/bas (bougies)", group = GRP_REINT, minval = 2, tooltip = "Mode « plus haut/plus bas » : nombre de bougies (courante incluse) pour le plus bas/haut.")
-slReintTol  = input.float(25.0,  "Tolérance SL (% range bougie)", group = GRP_REINT, minval = 0, step = 1, tooltip = "Mode « plus haut/plus bas » : buffer au-delà de l'extrême = ce % du range de la bougie qui a marqué l'extrême.")
+slReintLook = input.int(20, "Plus haut/bas — Lookback", inline = "rehl", group = GRP_REINT, minval = 2, tooltip = "Mode « plus haut/plus bas ». Lookback = nombre de bougies (courante incluse). Tol. % = buffer au-delà de l'extrême = % du range de la bougie qui a marqué l'extrême.")
+slReintTol  = input.float(25.0, "Tol. %", inline = "rehl", group = GRP_REINT, minval = 0, step = 1)
 
-var string GRP_POS = "Répartition & gestion"
+var string GRP_POS = "Gestion de position"
 // Modes de break-even (const strings : servent aux options input.string ET aux comparaisons)
 BE_NONE  = "Aucune"
 BE_TP1   = "Au TP1"
 BE_EARLY = "Anticipée (% prix)"
-qtyTP1    = input.int(50,   "Sortie TP1 (%)", group = GRP_POS, minval = 0, maxval = 100, tooltip = "TP1+TP2+TP3 doivent totaliser ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
-qtyTP2    = input.int(20,   "Sortie TP2 (%)", group = GRP_POS, minval = 0, maxval = 100)
-qtyTP3    = input.int(20,   "Sortie TP3 (%)", group = GRP_POS, minval = 0, maxval = 100)
+qtyTP1    = input.int(50, "Sortie % — TP1", inline = "split", group = GRP_POS, minval = 0, maxval = 100, tooltip = "Répartition : % de la position sorti à chaque cible. TP1+TP2+TP3 ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
+qtyTP2    = input.int(20, "TP2", inline = "split", group = GRP_POS, minval = 0, maxval = 100)
+qtyTP3    = input.int(20, "TP3", inline = "split", group = GRP_POS, minval = 0, maxval = 100)
 useRunner = input.bool(true, "Runner (reliquat, sort au stop)", group = GRP_POS, tooltip = "Si off, le reliquat est ajouté à TP3.")
 beMode     = input.string(BE_TP1, "Break-even", options = [BE_NONE, BE_TP1, BE_EARLY], group = GRP_POS, tooltip = "Aucune : stop fixe au SL. Au TP1 : BE quand le prix atteint TP1. Anticipée : BE quand le prix a parcouru le % ci-dessous en notre faveur (avant TP1).")
 earlyBEPct = input.float(1.0, "BE anticipée — % prix dans notre sens", group = GRP_POS, minval = 0.1, step = 0.1, tooltip = "Utilisé uniquement en mode « Anticipée ». % du prix d'entrée parcouru en notre faveur déclenchant le BE.")
+
+var string GRP_DBG = "Debug"
+debug     = input.bool(false, "Afficher les bulles de signal", group = GRP_DBG, tooltip = "Affiche les ronds sur les cassures/réintégrations détectées (les flèches restent toujours visibles).")
 
 // ============================================================
 // Constantes & couleurs

@@ -761,46 +761,68 @@ d'entrée :
 
 ### Settings
 
-**Général**
+Les inputs sont regroupés à l'écran dans cet ordre (libellés courts + détails en tooltip ; les triplets
+TP, qty et lookback/tolérance sont posés sur une seule ligne via `inline`).
+
+**Open Range**
 
 | Setting | Type | Défaut | Plage |
 |---------|------|--------|-------|
 | TZ Open Range | string | `Europe/Paris` | TZ IANA |
+
+**Signaux & exécution**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| Sens / hedge | string | `Les deux sens (hedge)` | hedge · long · short · net |
+| Cassure validée en CLÔTURE | bool | false | — |
 | Trades max / jour | int | 3 | 1-10 |
+| Positions max en cours | int | 2 | 1-10 |
+
+**Risque & levier**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
 | Risque par trade (%) | float | 1.0 | 0.05-100 |
 | Levier (×) | float | 10.0 | 1-100 |
-| Debug (franchissements OR) | bool | false | — |
 
 > Le **levier** cape la taille (`notionnel ≤ levier · equity`). `margin_long`/`margin_short` restent
 > `const` (≈ plafond 100×, imposé par Pine — CE10123 si input) ; c'est l'input `Levier (×)` qui pilote.
 
-**Setups**
+**Setup — Cassure**
 
 | Setting | Type | Défaut | Plage |
 |---------|------|--------|-------|
-| Cassure (continuation) | bool | true | — |
-| Réintégration (fade) | bool | true | — |
+| Activer la cassure | bool | true | — |
+| TP1 / TP2 / TP3 (×range) | float | 1.0 / 2.0 / 5.0 | ≥ 0.1 |
+| Mode SL | string | `% range` | `% range` · `Plus haut/plus bas` |
+| SL (% range) | float | 55.0 | ≥ 0 (non capé) |
+| Lookback / Tolérance (plus haut-bas) | int / float | 20 / 25.0 | ≥ 2 / ≥ 0 |
 
-**Multiples SL / TP**
-
-| Setting | Type | Défaut | Plage |
-|---------|------|--------|-------|
-| TP1 / TP2 / TP3 cassure (×range) | float | 1.0 / 2.0 / 5.0 | ≥ 0.1 |
-| TP1 / TP3 réintég (×range) | float | 0.5 / 2.0 | ≥ 0.1 |
-| Mode SL cassure | string | `% range` | `% range` · `Plus haut/plus bas` |
-| SL cassure (% range) | float | 55.0 | ≥ 0 (non capé) |
-| Mode SL réintég | string | `% mèche` | `% mèche` · `Plus haut/plus bas` |
-| SL réintég (% mèche) | float | 100.0 | ≥ 0 (non capé) |
-| Lookback plus haut/bas — cassure / réintég (bougies) | int | 20 / 20 | ≥ 2 |
-| Tolérance SL (% range bougie) — cassure / réintég | float | 25.0 / 25.0 | ≥ 0 |
-
-**Répartition & gestion**
+**Setup — Réintégration**
 
 | Setting | Type | Défaut | Plage |
 |---------|------|--------|-------|
-| Sortie TP1 / TP2 / TP3 (%) | int | 50 / 20 / 20 | 0-100 (somme ≤ 100) |
+| Activer la réintégration | bool | true | — |
+| TP1 / TP2 / TP3 (×range) | float | 0.5 / 1.0 / 2.0 | ≥ 0.1 |
+| Mode SL | string | `% mèche` | `% mèche` · `Plus haut/plus bas` |
+| SL (% mèche) | float | 100.0 | ≥ 0 (non capé) |
+| Lookback / Tolérance (plus haut-bas) | int / float | 20 / 25.0 | ≥ 2 / ≥ 0 |
+
+**Gestion de position**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| Sortie % — TP1 / TP2 / TP3 | int | 50 / 20 / 20 | 0-100 (somme ≤ 100) |
 | Runner (reliquat, sort au stop) | bool | true | — |
-| Passage à BE au TP1 | bool | true | — |
+| Break-even | string | `Au TP1` | `Aucune` · `Au TP1` · `Anticipée (% prix)` |
+| BE anticipée — % prix dans notre sens | float | 1.0 | ≥ 0.1 |
+
+**Debug**
+
+| Setting | Type | Défaut | Plage |
+|---------|------|--------|-------|
+| Afficher les bulles de signal | bool | false | — |
 
 ### Cas de test (à valider manuellement dans TradingView)
 
