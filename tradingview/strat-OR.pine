@@ -1,20 +1,26 @@
 //@version=6
-// 2Ai_Strat_OR — Stratégie Open Range (première heure du jour).
+// 2Ai_Strat_OR — Stratégie de RANGE appliquée à l'Open Range (1re heure du jour).
 // Deux setups sur le range OR :
-//   - CASSURE       : une bougie clôture hors du range (continuation).
-//   - RÉINTÉGRATION : une bougie sort (mèche ou N clôtures) puis clôture dans le range (fade).
-// ENTRÉE = ordre STOP sur l'extrême de la bougie déclencheuse, dans le sens du trade :
-//   long → buy-stop sur son HAUT ; short → sell-stop sur son BAS. L'ordre reste valide jusqu'à ce que
-//   le setup soit invalidé (le prix atteint le niveau du SL avant l'entrée) ou la fin de journée.
-//   Garde-fou : si l'extrême a déjà dépassé le TP1, le setup est ignoré.
-// SL/TP multi-cibles paramétrables, BE au TP1, runner. Sizing par risque constant (perte au SL = %
-// d'equity fixé). Rendu : 1 box position (entrée→TP3) + lignes TP1/TP2 + 1 box SL (grisée au BE/sortie).
-// Un rayon au niveau d'entrée (vert long / rouge short) porte la taille restante (live) ; au TP3 la box se fige, le rayon continue.
-// Panneau debug (haut-droite) : compteurs réels (setups / placés / skips / annulés / filés / engine).
+//   - CASSURE       : 1re bougie qui CLÔTURE hors du range (continuation).
+//   - RÉINTÉGRATION : après une cassure confirmée, une clôture qui REVIENT dans le range (fade).
+// ENTRÉE = modèle bulle→flèche : la bougie de signal (« bulle ») fige le niveau (son extrême) ; on entre
+//   AU MARCHÉ quand la bougie suivante (« flèche ») casse cet extrême (mèche en séance, ou clôture si
+//   `breakOnClose`). Garde-fou : on n'entre que si le TP1 est encore devant l'entrée.
+// SL/TP multi-cibles + BE (au TP1 ou anticipé) + runner. Sizing par RISQUE constant, capé par un levier.
+// Rendu (lib_strat_draw) : box entrée→TP3 + lignes TP1/TP2 + box SL (grisée au BE/sortie) + rayon
+//   d'exposition restante (live, au niveau d'entrée). Dessin DIFFÉRÉ au fill : un ordre non filé ne laisse
+//   aucune trace → le chart reflète le backtest.
+// Debug : un toggle affiche les bulles + flèches de signal (n'altère ni la détection ni les entrées).
+//
+// Architecture — la strat n'est qu'un ORCHESTRATEUR moteur ; le métier vit dans les libs :
+//   - lib_strat_range : détection setups + géométrie SL/TP + swingStop + trigger d'entrée (range-agnostique).
+//   - lib_risk        : sizing par risque/levier, BE/runner, filtre hedge/net.
+//   - lib_strat_draw  : tout le rendu de position.
+//   - lib_levels      : source du range (openRange ; extensible à sessionHL pour un Asian range, etc.).
 // Spec : .docs/SPECIFICATIONS.md § "Stratégie 1 : 2Ai_Strat_OR".
 //
 // Contrainte plateforme : une stratégie Pine n'a qu'UNE position nette. Un setup de sens opposé à
-// la position en cours est SKIPPÉ (sinon strategy.entry inverserait la position). Pyramiding = même sens.
+//   la position en cours est SKIPPÉ (sinon strategy.entry inverserait la position). Pyramiding = même sens.
 strategy("2Ai_Strat_OR", shorttitle = "Strat OR", overlay = true,
   pyramiding = 100,                                     // borne haute ; le vrai plafond/jour est `tradesMax`
   default_qty_type = strategy.percent_of_equity,
