@@ -1,0 +1,347 @@
+//@version=6
+// 2Ai_Strat_Asian — Stratégie de RANGE appliquée au RANGE DE LA SESSION ASIATIQUE.
+// Même stratégie que 2Ai_Strat_OR (cassure / réintégration), mais le range = High/Low de la session
+// asiatique (au lieu de la 1re heure du jour). Tout le métier est partagé via les libs ; seule la SOURCE
+// du range change (`lib_levels.sessionHL` au lieu de `openRange`).
+//   - CASSURE       : 1re bougie qui CLÔTURE hors du range (continuation).
+//   - RÉINTÉGRATION : après une cassure confirmée, une clôture qui REVIENT dans le range (fade).
+// ENTRÉE = modèle bulle→flèche : la bougie de signal (« bulle ») fige le niveau (son extrême) ; on entre
+//   AU MARCHÉ quand la bougie suivante (« flèche ») casse cet extrême (mèche en séance, ou clôture si
+//   `breakOnClose`). Garde-fou : on n'entre que si le TP1 est encore devant l'entrée.
+// SL/TP multi-cibles + BE (au TP1 ou anticipé) + runner. Sizing par RISQUE constant, capé par un levier.
+// Rendu (lib_strat_draw) : box entrée→TP3 + lignes TP1/TP2 + box SL (grisée au BE/sortie) + rayon
+//   d'exposition restante (live, au niveau d'entrée). Dessin DIFFÉRÉ au fill : un ordre non filé ne laisse
+//   aucune trace → le chart reflète le backtest.
+// Debug : un toggle affiche les bulles + flèches de signal (n'altère ni la détection ni les entrées).
+// Timeframe : pensée M5/M15 (tolérance jusqu'à H1 inclus) ; AU-DESSUS DE H1 la strat se BYPASSE entièrement
+//   (aucun ordre, aucun tracé) — garde-fou `tfSupported`.
+//
+// Architecture — la strat n'est qu'un ORCHESTRATEUR moteur ; le métier vit dans les libs :
+//   - lib_strat_range : détection setups + géométrie SL/TP + swingStop + trigger d'entrée (range-agnostique).
+//   - lib_risk        : sizing par risque/levier, BE/runner, filtre hedge/net.
+//   - lib_strat_draw  : tout le rendu de position.
+//   - lib_levels      : source du range (sessionHL — session asiatique ; cf. 2Ai_Strat_OR pour l'Open Range).
+// Spec : .docs/SPECIFICATIONS.md § "Stratégie 2 : 2Ai_Strat_Asian".
+//
+// ⚠ La session ne doit PAS traverser minuit dans sa TZ (lib_levels.sessionHL ne gère pas le cross-midnight) ;
+//   l'asiatique en Asia/Tokyo (ex. 0800-1400) est OK.
+//
+// Contrainte plateforme : une stratégie Pine n'a qu'UNE position nette. Un setup de sens opposé à
+//   la position en cours est SKIPPÉ (sinon strategy.entry inverserait la position). Pyramiding = même sens.
+strategy("2Ai_Strat_Asian", shorttitle = "Strat Asian", overlay = true,
+  pyramiding = 100,                                     // borne haute ; le vrai plafond/jour est `tradesMax`
+  default_qty_type = strategy.percent_of_equity,
+  default_qty_value = 1.0,                              // fallback ; écrasé par la qty explicite (sizing par risque)
+  initial_capital = 10000,
+  calc_on_every_tick = false,
+  process_orders_on_close = true,                       // entrée au marché à la CLÔTURE de la bougie-flèche
+  margin_long = 1, margin_short = 1,                    // plafond TECHNIQUE : marge 1 % = 100× max (Pine exige un const ici).
+  // Le levier OPÉRATIONNEL est l'input « Levier (×) » : il cape la qty (notionnel ≤ levier × equity), donc aucun
+  // rejet broker tant que le levier choisi reste ≤ 100×. Le sizing par RISQUE pilote la qty, le levier en est le plafond.
+  max_boxes_count = 500, max_lines_count = 500, max_labels_count = 500)
+
+import mpilard/lib_levels/12      as levels
+import mpilard/lib_strat_range/2  as stratRange   // setups de range (détection + trigger d'entrée)
+import mpilard/lib_strat_draw/1   as stratDraw    // rendu position générique
+import mpilard/lib_risk/1         as risk         // gestion du risque (sizing, BE/runner, exposition)
+
+// ============================================================
+// Inputs
+// ============================================================
+var string GRP_RANGE = "Range (session asiatique)"
+asianSession = input.session("0800-1400", "Session asiatique", group = GRP_RANGE, tooltip = "Plage horaire de la session, dans la TZ ci-dessous. NE DOIT PAS traverser minuit (sessionHL ne gère pas le cross-midnight).")
+asianTz      = input.string("Asia/Tokyo", "TZ session", group = GRP_RANGE, tooltip = "TZ IANA dans laquelle la session est définie.")
+chartTz      = input.string("Europe/Paris", "TZ chart (reset jour)", group = GRP_RANGE, tooltip = "TZ du 'minuit' chart : borne la session à la journée et réinitialise l'état (Pine n'expose pas la TZ d'affichage).")
+
+var string GRP_EXEC = "Signaux & exécution"
+// Sens / hedge (const strings : options input.string + comparaisons)
+DIR_BOTH  = "Les deux sens (hedge)"
+DIR_LONG  = "Long seul"
+DIR_SHORT = "Short seul"
+DIR_NET   = "Sens unique (net, anti-hedge)"
+dirMode   = input.string(DIR_BOTH, "Sens / hedge", options = [DIR_BOTH, DIR_LONG, DIR_SHORT, DIR_NET], group = GRP_EXEC, tooltip = "Les deux sens (hedge) : on DESSINE les deux ; ⚠ le moteur n'a qu'une position nette (il nette les sens opposés) → backtest fiable surtout en Long/Short/Net. Long/Short seul : un seul sens. Sens unique (net) : refuse un setup opposé à la position en cours.")
+breakOnClose = input.bool(false, "Cassure validée en CLÔTURE (sinon mèche/séance)", group = GRP_EXEC, tooltip = "S'applique aux DEUX setups. Coché : la bougie suivante doit CLÔTURER au-delà de l'extrême de la bulle. Décoché : il suffit que la mèche le franchisse en séance.")
+tradesMax = input.int(3, "Trades max / jour", group = GRP_EXEC, minval = 1, maxval = 10)
+maxOpen   = input.int(2, "Positions max en cours", group = GRP_EXEC, minval = 1, maxval = 10, tooltip = "Positions ouvertes simultanément autorisées (renfort). Au-delà, le setup est ignoré.")
+
+var string GRP_RISK = "Risque & levier"
+riskPct   = input.float(1.0, "Risque par trade (%)", group = GRP_RISK, minval = 0.05, maxval = 100, step = 0.05, tooltip = "Taille calculée pour que la perte au SL = ce % d'equity. Écrase l'Order size de l'onglet Properties.")
+maxLev    = input.float(10.0, "Levier (×)", group = GRP_RISK, minval = 1.0, maxval = 100.0, step = 1.0, tooltip = "Plafond de levier : cape la taille pour que le notionnel (qty×prix) ≤ levier × equity. Le sizing par risque réclame souvent un gros notionnel (SL serré) ; au-delà de ce levier la qty est capée (le risque réel devient < cible). 1× = compte cash sans levier.")
+
+var string GRP_BREAK = "Setup — Cassure"
+SL_RANGE = "% range"
+SL_HL    = "Plus haut/plus bas"
+enableBreak = input.bool(true, "Activer la cassure (continuation)", group = GRP_BREAK)
+tpBreak1    = input.float(1.0, "TP1", inline = "brtp", group = GRP_BREAK, minval = 0.1, step = 0.1, tooltip = "TP1 / TP2 / TP3 en multiples du range (session asiatique).")
+tpBreak2    = input.float(2.0, "TP2", inline = "brtp", group = GRP_BREAK, minval = 0.1, step = 0.1)
+tpBreak3    = input.float(5.0, "TP3", inline = "brtp", group = GRP_BREAK, minval = 0.1, step = 0.1)
+slBreakMode = input.string(SL_RANGE, "Mode SL", options = [SL_RANGE, SL_HL], group = GRP_BREAK, tooltip = "« % range » : SL à X % du range depuis la borne cassée. « Plus haut/plus bas » : SL sur le plus bas (long) / plus haut (short) des N dernières bougies + tolérance.")
+slBreakPct  = input.float(55.0, "SL (% range)", group = GRP_BREAK, minval = 0, step = 1, tooltip = "Mode « % range » : % du range depuis la borne cassée. Non capé : >100 autorisé.")
+slBreakLook = input.int(20, "Plus haut/bas — Lookback", inline = "brhl", group = GRP_BREAK, minval = 2, tooltip = "Mode « plus haut/plus bas ». Lookback = nombre de bougies (courante incluse). Tol. % = buffer au-delà de l'extrême = % du range de la bougie qui a marqué l'extrême.")
+slBreakTol  = input.float(25.0, "Tol. %", inline = "brhl", group = GRP_BREAK, minval = 0, step = 1)
+
+var string GRP_REINT = "Setup — Réintégration"
+SL_WICK = "% mèche"
+enableReint = input.bool(true, "Activer la réintégration (fade)", group = GRP_REINT)
+tpReint1    = input.float(0.5, "TP1", inline = "retp", group = GRP_REINT, minval = 0.1, step = 0.1, tooltip = "TP1 / TP2 / TP3 en multiples du range (session asiatique). TP2 réintég : 1.0 = borne opposée du range.")
+tpReint2    = input.float(1.0, "TP2", inline = "retp", group = GRP_REINT, minval = 0.1, step = 0.1)
+tpReint3    = input.float(2.0, "TP3", inline = "retp", group = GRP_REINT, minval = 0.1, step = 0.1)
+slReintMode = input.string(SL_WICK, "Mode SL", options = [SL_WICK, SL_HL], group = GRP_REINT, tooltip = "« % mèche » : SL au-delà de l'extrême de la bougie de réintégration (+ X % de sa mèche). « Plus haut/plus bas » : SL sur le plus bas/haut des N dernières bougies + tolérance.")
+slReintWick = input.float(100.0, "SL (% mèche)", group = GRP_REINT, minval = 0, step = 5, tooltip = "Mode « % mèche » : fraction de la mèche de l'extrême de la bougie de réintégration, ajoutée au-delà (body si open en extrême). Non capé.")
+slReintLook = input.int(20, "Plus haut/bas — Lookback", inline = "rehl", group = GRP_REINT, minval = 2, tooltip = "Mode « plus haut/plus bas ». Lookback = nombre de bougies (courante incluse). Tol. % = buffer au-delà de l'extrême = % du range de la bougie qui a marqué l'extrême.")
+slReintTol  = input.float(25.0, "Tol. %", inline = "rehl", group = GRP_REINT, minval = 0, step = 1)
+
+var string GRP_POS = "Gestion de position"
+// Modes de break-even (const strings : servent aux options input.string ET aux comparaisons)
+BE_NONE  = "Aucune"
+BE_TP1   = "Au TP1"
+BE_EARLY = "Anticipée (% prix)"
+qtyTP1    = input.int(50, "Sortie % — TP1", inline = "split", group = GRP_POS, minval = 0, maxval = 100, tooltip = "Répartition : % de la position sorti à chaque cible. TP1+TP2+TP3 ≤ 100 %. Le reliquat = runner (ou ajouté à TP3 si runner off).")
+qtyTP2    = input.int(20, "TP2", inline = "split", group = GRP_POS, minval = 0, maxval = 100)
+qtyTP3    = input.int(20, "TP3", inline = "split", group = GRP_POS, minval = 0, maxval = 100)
+useRunner = input.bool(true, "Runner (reliquat, sort au stop)", group = GRP_POS, tooltip = "Si off, le reliquat est ajouté à TP3.")
+beMode     = input.string(BE_TP1, "Break-even", options = [BE_NONE, BE_TP1, BE_EARLY], group = GRP_POS, tooltip = "Aucune : stop fixe au SL. Au TP1 : BE quand le prix atteint TP1. Anticipée : BE quand le prix a parcouru le % ci-dessous en notre faveur (avant TP1).")
+earlyBEPct = input.float(1.0, "BE anticipée — % prix dans notre sens", group = GRP_POS, minval = 0.1, step = 0.1, tooltip = "Utilisé uniquement en mode « Anticipée ». % du prix d'entrée parcouru en notre faveur déclenchant le BE.")
+
+var string GRP_DBG = "Debug"
+debug     = input.bool(false, "Afficher bulles + flèches de signal", group = GRP_DBG, tooltip = "Affiche les ronds (bulles) sur les cassures/réintégrations détectées ET les flèches d'entrée (cassure de la bulle). N'altère pas la détection ni les entrées.")
+
+// Mapping des input.string vers les enums de lib_risk (cf. lib_risk.DirMode / BeMode).
+risk.DirMode dmRisk = dirMode == DIR_LONG ? risk.DirMode.LONG : dirMode == DIR_SHORT ? risk.DirMode.SHORT : dirMode == DIR_NET ? risk.DirMode.NET : risk.DirMode.BOTH
+risk.BeMode  bmRisk = beMode  == BE_TP1 ? risk.BeMode.AT_TP1 : beMode == BE_EARLY ? risk.BeMode.EARLY : risk.BeMode.NONE
+
+// ============================================================
+// Constantes
+// ============================================================
+// (Couleurs & transparences du rendu de position → lib_strat_draw.)
+RUN_LEAD = 5      // rayon « exposition restante » : porté N barres DEVANT la barre courante (passé à lib_strat_draw)
+
+// Répartition effective (le reliquat va au runner, ou à TP3 si runner off)
+splitBase  = qtyTP1 + qtyTP2 + qtyTP3
+remainder  = math.max(0, 100 - splitBase)
+runnerPct  = useRunner ? remainder : 0
+p3eff      = useRunner ? qtyTP3 : qtyTP3 + remainder
+validSplit = splitBase <= 100
+
+// ============================================================
+// Type Trade — état d'une position DESSINÉE (niveaux + objets graphiques + cycle de vie)
+// ============================================================
+type Trade
+    string id          // id ordre moteur (strategy.entry / strategy.exit)
+    int   dir          // +1 long, -1 short
+    float entry
+    float sl
+    float tp1
+    float tp2
+    float tp3
+    bool  closed       // figée : SL/BE ou TP3 touché
+    bool  slGreyed     // BE armé : stop ramené à l'entrée (état MOTEUR ; le grisage visuel est dans pd)
+    bool  runner       // reliquat runner seul (TP3 atteint) → ne compte plus comme position en cours
+    stratDraw.PositionDraw pd   // tous les objets graphiques de la position (lib_strat_draw)
+
+// Entrée PLACÉE mais pas encore DESSINÉE : on attend la confirmation du fill (liveSize ≠ 0) pour ne
+//   dessiner que les trades réellement exécutés (un ordre capé à 0 par le capital ne laisse aucune trace).
+type Pending
+    string id
+    int   dir
+    float entry
+    float sl
+    float tp1
+    float tp2
+    float tp3
+    int   barIdx       // bar_index de l'entrée — sert à détecter le non-fill (barre suivante)
+    int   t0           // time de l'entrée — ancre gauche du dessin (la box démarre bien à la bougie-flèche)
+
+// ============================================================
+// État persistant (reset au changement de jour chart)
+// ============================================================
+var int   tradesToday  = 0       // compteur de trades du jour (plafond `tradesMax`) — reset au changement de jour
+// (État d'excursion + détection cassure/réintégration → lib_strat_range, machine d'état interne.)
+var array<Trade> trades = array.new<Trade>()
+var array<Pending> pending = array.new<Pending>()   // entrées placées en attente de confirmation de fill
+
+// Compteurs debug (cumulés sur tout le backtest, jamais reset)
+var int cntTriggers  = 0   // setups détectés
+var int cntPlaced    = 0   // ordres d'entrée placés (marché à la clôture)
+var int cntCancelled = 0   // ordres non filés (qty capée à 0 par le capital) → purgés sans trace
+var int cntFilled    = 0   // ordres réellement filés (boxes matérialisées)
+
+// ============================================================
+// Calculs de barre (jamais en bloc conditionnel pour ta.*)
+// ============================================================
+oneBarMs  = timeframe.in_seconds() * 1000
+dayChange = ta.change(dayofmonth(time, chartTz)) != 0   // aligné sur le reset interne de lib_levels.sessionHL
+// Garde-fou timeframe : stratégie pensée M5/M15 (tolérance jusqu'à H1 inclus). AU-DESSUS DE H1 → on
+//   BYPASSE tout (aucun ordre placé, aucun tracé) pour être sûr de ne rien exécuter sur un TF inadapté.
+tfSupported = timeframe.in_seconds() <= 3600
+
+// Range = High/Low de la session asiatique (running pendant la session, figé après sEnd).
+[rngH, rngL, rngStart, rngEnd, rngSeen, rngInS] = levels.sessionHL(asianSession, asianTz, chartTz)
+R        = rngH - rngL
+rngReady = rngSeen and not na(rngEnd) and not na(R) and R > 0 and time >= rngEnd
+
+// Ouvre une position DESSINÉE (via lib_strat_draw) et la tracke dans `trades`. Ancrée à la bougie
+//   d'entrée `lt` (la flèche). Le rendu (box profit/SL, lignes TP, rayon d'expo + label) + son cycle
+//   de vie sont entièrement délégués à lib_strat_draw ; ici on ne tient que l'état MOTEUR du trade.
+openPos(string id, int dir, float entry, float sl, float tp1, float tp2, float tp3, int lt) =>
+    pd = stratDraw.newPositionDraw(lt, oneBarMs, RUN_LEAD, dir, entry, sl, tp1, tp2, tp3, qtyTP1 > 0, qtyTP2 > 0)
+    array.push(trades, Trade.new(id = id, dir = dir, entry = entry, sl = sl, tp1 = tp1, tp2 = tp2, tp3 = tp3, closed = false, slGreyed = false, runner = false, pd = pd))
+
+// Taille réellement encore ouverte pour un ordre d'entrée (somme des positions moteur portant cet id).
+//   Signée : négative pour un short. Alimente le label « taille restante » du rayon (décroît aux TP filés).
+liveSize(string id) =>
+    s = 0.0
+    if strategy.opentrades > 0
+        for i = 0 to strategy.opentrades - 1
+            if strategy.opentrades.entry_id(i) == id
+                s += strategy.opentrades.size(i)
+    s
+
+// --- Détection des setups de range — déléguée à lib_strat_range ---
+//   Appelée À CHAQUE BARRE, hors conditionnel : la lib tient la machine d'état d'excursion en interne et
+//   ne déclenche que sur bougie fermée. `dayChange` purge son état ; `rngReady` = range figé.
+sig = stratRange.detectRangeSetup(
+     rngH, rngL, rngReady, dayChange,
+     enableBreak, enableReint,
+     slBreakMode == SL_HL, slBreakPct, slBreakLook, slBreakTol,
+     slReintMode == SL_HL, slReintWick, slReintLook, slReintTol,
+     tpBreak1, tpBreak2, tpBreak3,
+     tpReint1, tpReint2, tpReint3)
+
+// Niveaux figés du setup (na hors déclenchement), lus en [1] à la flèche (bougie suivante).
+dbgTrigUp = sig.triggered and sig.dir ==  1 ? sig.entry : na
+dbgTrigDn = sig.triggered and sig.dir == -1 ? sig.entry : na
+sigSL  = sig.triggered ? sig.sl  : na
+sigTP1 = sig.triggered ? sig.tp1 : na
+sigTP2 = sig.triggered ? sig.tp2 : na
+sigTP3 = sig.triggered ? sig.tp3 : na
+
+// Compteur debug + reset du compteur de trades du jour (l'état d'excursion, lui, est reset DANS la lib).
+if barstate.isconfirmed and tfSupported
+    if sig.triggered
+        cntTriggers += 1
+    if dayChange
+        tradesToday := 0
+
+// ============================================================
+// Visualisation du range (session asiatique) + debug
+// ============================================================
+// Bornes du range : lignes au niveau du range, ANCRÉES à rngStart (même début que le background) et
+//   étendues vers la droite. Un couple par jour (réf lâchée au nouveau jour, les précédentes restent figées).
+var line rngHiLn = na
+var line rngLoLn = na
+if dayChange
+    rngHiLn := na
+    rngLoLn := na
+if rngReady and tfSupported
+    rxq = time + oneBarMs
+    if na(rngHiLn)
+        rngHiLn := line.new(rngStart, rngH, rxq, rngH, xloc = xloc.bar_time, color = color.new(color.orange, 0), width = 1, force_overlay = true)
+        rngLoLn := line.new(rngStart, rngL, rxq, rngL, xloc = xloc.bar_time, color = color.new(color.orange, 0), width = 1, force_overlay = true)
+    else
+        line.set_x2(rngHiLn, rxq)
+        line.set_x2(rngLoLn, rxq)
+// Zone du range : rectangle SANS bordure, ancré à la 1re bougie de la session (rngStart) et borné aux
+//   bornes du range (rngH/rngL). Se CONSTRUIT EN LIVE pendant la session (rngInS) : top/bottom suivent le
+//   range courant, bord droit étendu chaque barre, jusqu'à la fin de session où il fige. Un par jour.
+var box rngZone = na
+if dayChange
+    rngZone := na
+if tfSupported and rngInS
+    if na(rngZone)
+        rngZone := box.new(left = rngStart, top = rngH, right = time + oneBarMs, bottom = rngL, xloc = xloc.bar_time, bgcolor = color.new(color.orange, 90), border_width = 0, force_overlay = true)
+    else
+        box.set_top(rngZone, rngH)
+        box.set_bottom(rngZone, rngL)
+        box.set_right(rngZone, time + oneBarMs)
+// BULLES : ronds au niveau d'entrée potentiel — lime = signal long (cassure haute / réintég basse),
+//          rouge = signal short (cassure basse / réintég haute). Marquent les cassures et réintégrations.
+plot(tfSupported and debug ? dbgTrigUp : na, "Signal long",  color = color.new(color.lime, 0), style = plot.style_circles, linewidth = 3)
+plot(tfSupported and debug ? dbgTrigDn : na, "Signal short", color = color.new(color.red,  0), style = plot.style_circles, linewidth = 3)
+
+// FLÈCHES : la bougie de bulle (signal, [1]) est-elle cassée par la bougie courante (la flèche) ?
+//   Trigger d'entrée délégué à lib_strat_range : renvoie [déclenché, prix d'entrée].
+[breakUp, eUp] = stratRange.entryTrigger(dbgTrigUp[1],  1, breakOnClose)
+[breakDn, eDn] = stratRange.entryTrigger(dbgTrigDn[1], -1, breakOnClose)
+plotshape(tfSupported and debug and breakUp, "Breakup",   style = shape.arrowup,   location = location.belowbar, color = color.new(color.lime, 0), size = size.small)
+plotshape(tfSupported and debug and breakDn, "Breakdown", style = shape.arrowdown, location = location.abovebar, color = color.new(color.red,  0), size = size.small)
+
+// VIE DE LA POSITION dessinée — uniquement sur bougie fermée (pas de doublon en temps réel).
+//   AU-DESSUS DE H1 : tout ce bloc est bypassé (`tfSupported`) → aucun ordre, aucune position dessinée.
+if barstate.isconfirmed and tfSupported
+    // Résolution des entrées en attente : on ne DESSINE qu'une fois le fill confirmé (liveSize ≠ 0),
+    //   ancré à la bougie d'entrée (p.t0). Tourne AVANT les plafonds pour que les fills soient comptés.
+    //   Un ordre non filé (qty capée à 0 par le capital) est purgé dès la barre suivante → aucune trace.
+    if array.size(pending) > 0
+        for pi = array.size(pending) - 1 to 0
+            p = array.get(pending, pi)
+            if liveSize(p.id) != 0
+                openPos(p.id, p.dir, p.entry, p.sl, p.tp1, p.tp2, p.tp3, p.t0)
+                array.remove(pending, pi)
+                cntFilled += 1
+            else if bar_index > p.barIdx
+                array.remove(pending, pi)
+                cntCancelled += 1
+
+    // Plafonds : `tradesMax` trades ouverts/jour, `maxOpen` positions simultanées (renfort).
+    // Positions « en cours » = ouvertes NON-runner (un runner de-riské ne compte pas : ni slot maxOpen, ni sens).
+    //   openCount = leur nombre ; netDir = leur sens (+1 long / -1 short, 0 si aucune) — ne sert qu'au mode « net ».
+    int openCount = 0
+    int netDir    = 0
+    for t in trades
+        if not t.runner
+            openCount += 1
+            netDir := t.dir
+    // Filtre d'exposition (hedge/net) → lib_risk ; ANDé avec validSplit (validité de la répartition, strat-local).
+    [allowLongDir, allowShortDir] = risk.directionAllowed(dmRisk, netDir)
+    allowLong  = validSplit and allowLongDir
+    allowShort = validSplit and allowShortDir
+    if breakUp and tradesToday < tradesMax and openCount < maxOpen and allowLong
+        qUp = risk.riskSize(strategy.equity, eUp, sigSL[1], syminfo.pointvalue, riskPct, maxLev)
+        if sigTP1[1] > eUp and qUp > 0                   // TP1 devant l'entrée (long) + taille calculable
+            eid = str.tostring(bar_index) + "L"
+            strategy.entry(eid, strategy.long, qty = qUp)   // marché à la clôture, taille par risque
+            array.push(pending, Pending.new(id = eid, dir = 1, entry = eUp, sl = sigSL[1], tp1 = sigTP1[1], tp2 = sigTP2[1], tp3 = sigTP3[1], barIdx = bar_index, t0 = time))
+            tradesToday += 1
+            cntPlaced += 1
+    if breakDn and tradesToday < tradesMax and openCount < maxOpen and allowShort
+        qDn = risk.riskSize(strategy.equity, eDn, sigSL[1], syminfo.pointvalue, riskPct, maxLev)
+        if sigTP1[1] < eDn and qDn > 0                   // TP1 devant l'entrée (short) + taille calculable
+            eid = str.tostring(bar_index) + "S"
+            strategy.entry(eid, strategy.short, qty = qDn)
+            array.push(pending, Pending.new(id = eid, dir = -1, entry = eDn, sl = sigSL[1], tp1 = sigTP1[1], tp2 = sigTP2[1], tp3 = sigTP3[1], barIdx = bar_index, t0 = time))
+            tradesToday += 1
+            cntPlaced += 1
+
+    // Chaque barre fermée : étendre les positions, armer le BE, FIGER au stop/BE ou au TP3 ; rendu délégué.
+    if array.size(trades) > 0
+        for t in trades
+            if not t.closed
+                // Stop courant : SL d'origine, ou BE (= entrée) une fois la position sécurisée (slGreyed).
+                stopNow = t.slGreyed ? t.entry : t.sl
+                // Sorties partielles moteur (stop COMMUN, suit le BE) : TP1/TP2/TP3 en limites + runner au stop/BE.
+                if qtyTP1 > 0
+                    strategy.exit("t1" + t.id, from_entry = t.id, qty_percent = qtyTP1, stop = stopNow, limit = t.tp1)
+                if qtyTP2 > 0
+                    strategy.exit("t2" + t.id, from_entry = t.id, qty_percent = qtyTP2, stop = stopNow, limit = t.tp2)
+                if p3eff > 0
+                    strategy.exit("t3" + t.id, from_entry = t.id, qty_percent = p3eff, stop = stopNow, limit = t.tp3)
+                if runnerPct > 0
+                    strategy.exit("tr" + t.id, from_entry = t.id, qty_percent = runnerPct, stop = stopNow)
+                // Décisions de gestion du risque (sortie / BE / runner) → lib_risk (pur). La strat les APPLIQUE.
+                [stopHit, tp3Hit, beArm, runnerBirth] = risk.positionEvents(t.dir, t.entry, t.tp1, t.tp3, stopNow, runnerPct, bmRisk, earlyBEPct, t.slGreyed, t.runner)
+                if stopHit or (runnerPct == 0 and tp3Hit)
+                    t.closed := true                             // sortie : stop/BE (toute phase) ou TP3 sans runner
+                else
+                    if runnerBirth
+                        t.runner := true                         // TP3 atteint → reliquat runner (ne compte plus comme position en cours)
+                    if beArm
+                        t.slGreyed := true                       // BE armé (état moteur ; le grisage visuel est fait par le rendu)
+                // Rendu (lib_strat_draw) : extension, taille live, freeze au TP3, grisage BE, suppression du rayon à la sortie.
+                ls = liveSize(t.id)
+                sizeText = ls != 0 ? str.tostring(ls, "#.###") : ""
+                stratDraw.tickPositionDraw(t.pd, time, oneBarMs, RUN_LEAD, sizeText, runnerBirth, beArm, t.closed)
+        // Purge des positions figées (boxes déjà dessinées, gelées à leur dernier bord droit).
+        for i = array.size(trades) - 1 to 0
+            if array.get(trades, i).closed
+                array.remove(trades, i)
