@@ -861,4 +861,36 @@ TP, qty et lookback/tolérance sont posés sur une seule ligne via `inline`).
 | 6 | TP1 atteint | SL du reliquat ramené à BE (prix d'entrée) |
 | 7 | Plusieurs setups dans la journée jusqu'au plafond | Pyramiding jusqu'à « Trades max / jour », puis blocage |
 | 8 | Changement de jour avec position ouverte | Position laissée vivre, runner non clôturé d'office |
+
+---
+
+## Stratégie 2 : 2Ai_Strat_Asian (`strat-asian.pine`)
+
+**Identique à la Stratégie 1** (cassure / réintégration, entrée bulle→flèche, SL/TP par setup, sizing par
+risque + levier, BE/runner, dessin différé, garde-fou TF) — **seule la SOURCE du range change** : au lieu
+de l'Open Range (1re heure), le range = **High/Low de la session asiatique**.
+
+### Différences vs Stratégie 1
+- **Source du range** : `lib_levels.sessionHL(session, tzSession, tzChart)` au lieu de `openRange(tz)`.
+  Renvoie le H/L **running** de la session (figé après sa fin), comme l'OR pour la 1re heure.
+- **Inputs de range** (groupe « Range (session asiatique) ») : `Session asiatique` (`input.session`, défaut
+  **`0800-1400`**), `TZ session` (défaut **`Asia/Tokyo`**), `TZ chart (reset jour)` (défaut `Europe/Paris`).
+  ⚠ La session **ne doit pas traverser minuit** dans sa TZ (`sessionHL` ne gère pas le cross-midnight).
+- **Reset** : `dayChange` aligné sur `chartTz` (= reset interne de `sessionHL`).
+- **Rendu du range** : zone construite **en live pendant la session** (flag `inSession`), lignes ancrées
+  au **début de session** ; couleur **orange** (cohérent avec la session asiatique dans `2Ai Levels`).
+- Tout le reste (libs, géométrie, gestion) est **partagé** avec la Stratégie 1.
+
+### Settings
+Identiques à la Stratégie 1, **sauf** le groupe « Open Range » remplacé par « Range (session asiatique) »
+(Session / TZ session / TZ chart). Les défauts SL/TP/risque/gestion sont les mêmes (à ajuster par actif).
+
+### Cas de test
+Repris de la Stratégie 1 (cassure, réintégration, BE, runner, plafonds, dessin différé), **plus** :
+
+| # | Scénario | Attendu |
+|---|----------|---------|
+| A1 | Session `0800-1400` Asia/Tokyo, instrument 24 h | Zone tracée sur 08:00-14:00 Tokyo, range figé à 14:00 |
+| A2 | Changement d'heure d'été/hiver | L'open de session suit la TZ Tokyo (pas de décalage) |
+| A3 | Session définie traversant minuit | Comportement non garanti (limite `sessionHL`) — à éviter |
 | 9 | Instrument cash EU vs crypto 24 h | OR cohérent avec la TZ choisie (minuit de `tz`) |
